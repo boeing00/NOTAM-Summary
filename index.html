@@ -926,6 +926,8 @@ E) NAV ILS RWY 26R CAT II/III NA`
                     dep,
                     dest,
                     altn,
+                    isJfkToIcn,
+                    isIcnToLax,
                     flightTime,
                     routeText,
                     refileStr,
@@ -980,6 +982,7 @@ E) NAV ILS RWY 26R CAT II/III NA`
 
         function renderExecutiveReport(b) {
             const doc = document.getElementById('reportDocument');
+            const isJfkToIcn = (b.meta.isJfkToIcn !== undefined) ? b.meta.isJfkToIcn : (b.meta.dep === "KJFK");
             document.getElementById('headerSubtitle').innerText = `${b.meta.flightNo} (${b.meta.callsign}) | ${b.meta.dep} ➔ ${b.meta.dest} | ${b.meta.acftType} ${b.meta.reg}`;
 
             let html = `
