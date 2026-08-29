@@ -1216,7 +1216,17 @@
             // "Needs review" means en-route only. Ground NOTAMs at our own
             // airports are counted separately rather than folded in here - they
             // swamped the list, and the station tabs already cover them.
-            const needsReview = routeRelated && limits.length > 0;
+            // A navaid outage only matters when it is a navaid we use. `weak`
+            // holds our filed 3-letter navaids found in the text; if any is
+            // there the item stays, which is the safe direction to err.
+            const NAVAID_WORD = /\b(VOR|VORTAC|DVOR|TACAN|NDB|DME|LOC|LOM|LDA|MLS|NAVAID)\b/;
+            const OUTAGE_WORD = /\b(U\/S|OTS|UNUSABLE|UNSERVICEABLE|OUT OF SERVICE)\b/;
+            const isNavaidOutage =
+                !/\bTRIGGER NOTAM\b|\bAIP SUP\b/.test(body) &&
+                lines.some((l) => NAVAID_WORD.test(l) && OUTAGE_WORD.test(l));
+            const navaidNoise = isNavaidOutage && strong.length === 0 && weak.length === 0;
+
+            const needsReview = routeRelated && limits.length > 0 && !navaidNoise;
 
             // The NOTAM names routes or fixes and not one of them is ours.
             // Usually that means another corridor - but a named fix can also be
@@ -1247,6 +1257,7 @@
                 limitQuotes,
                 separated,
                 scopedElsewhere,
+                navaidNoise,
                 routeRelated,
                 airportRelated,
                 relevant: routeRelated || airportRelated,
@@ -1268,11 +1279,12 @@
             };
 
             const rows = [];
-            let outside = 0, airportCount = 0, routeCount = 0, review = 0, scoped = 0;
+            let outside = 0, airportCount = 0, routeCount = 0, review = 0, scoped = 0, navNoise = 0;
             for (const n of notams) {
                 const r = crossCheckNotam(n, ctx);
                 if (r.timeState === "OUTSIDE") outside++;
                 if (r.airportRelated) airportCount++;
+                if (r.navaidNoise && r.routeRelated && r.limits.length) navNoise++;
                 if (r.routeRelated) routeCount++;
                 if (r.needsReview) {
                     review++;
@@ -1304,6 +1316,7 @@
                 routeCount,
                 review,
                 scoped,
+                navNoise,
                 rows: rows.slice(0, 40)
             };
         }
@@ -1917,6 +1930,7 @@ E) NAV ILS RWY 26R CAT II/III NA`
                             제한 표현을 포함한 NOTAM이라는 뜻입니다. 충족 여부는 기계가 판단하지 않으므로 반드시 직접 읽으십시오.
                             <br class="hidden sm:block">
                             ${xc.scoped ? `이 중 <strong class="text-slate-300">${xc.scoped}건</strong>은 NOTAM이 지정한 항공로·지점이 내 항로와 하나도 걹치지 않아 목록 맨 아래로 내렸습니다. 다만 지정 지점이 <em>경계</em>로 쓰인 경우(“… 북쪽으로 비행하라”)도 있으므로 숨기지는 않습니다.<br class="hidden sm:block">` : ''}
+                            ${xc.navNoise ? `항법시설 U/S NOTAM <strong class="text-slate-300">${xc.navNoise}건</strong>은 해당 시설이 내 항로에 없어 목록에서 제외했습니다 (아래 전체 NOTAM 목록에는 그대로 있습니다).<br class="hidden sm:block">` : ''}
                             공항 NOTAM(출발·도착·교체·회항지)은 이 목록에 들어오지 않지만 <strong class="text-slate-300">사라지지 않습니다</strong> —
                             위 “공항 NOTAM” 집계와 아래 공항별 탭에서 별도로 확인하십시오.
                         </p>
