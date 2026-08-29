@@ -670,7 +670,10 @@
                     navaids.add(tok);
                 }
             }
-            return { fixes, airways, navaids, points };
+            // Ordered and decoded, for the geometry. Set iteration follows
+            // insertion order, which here is the order they are filed.
+            const pointList = Array.from(points).map(decodeLatLon).filter(Boolean);
+            return { fixes, airways, navaids, points, pointList };
         }
 
         /**
@@ -726,6 +729,175 @@
             [/\bWIP\b|\bWORK IN PROGRESS\b|\bCONSTRUCTION\b/, "공사", ["WORK IN PROGRESS", "CONSTRUCTION", "WIP"]]
         ];
 
+        /* ====================================================================
+         * Geometry
+         *
+         * Most of this app deliberately refuses to decide anything, because most
+         * NOTAM restrictions are prose. These are the exception: when a NOTAM
+         * states a centre, a radius and vertical limits, whether the filed route
+         * touches it is arithmetic, not interpretation.
+         *
+         *   E) ... 3NM RADIUS CENTERED ON 084325N1674307E (KWAJALEIN ATOLL)
+         *   F) FL055
+         *   G) FL310
+         *
+         * The route polyline is built only from the lat/long points actually in
+         * field 15. Named fixes carry no coordinates in these documents, so the
+         * legs between them are drawn as great circles - an approximation, and
+         * the card says so.
+         * ==================================================================== */
+
+        const NM_PER_RAD = 3440.065;
+        const toRad = (d) => (d * Math.PI) / 180;
+
+        /** Decodes the coordinate forms these packages actually use. */
+        function decodeLatLon(tok) {
+            let m;
+            // 084325N1674307E - degrees, minutes, seconds
+            m = tok.match(/^(\d{2})(\d{2})(\d{2})([NS])(\d{3})(\d{2})(\d{2})([EW])$/);
+            if (m) {
+                return {
+                    lat: (+m[1] + m[2] / 60 + m[3] / 3600) * (m[4] === "S" ? -1 : 1),
+                    lon: (+m[5] + m[6] / 60 + m[7] / 3600) * (m[8] === "W" ? -1 : 1)
+                };
+            }
+            // 4836N15620E - degrees and minutes
+            m = tok.match(/^(\d{2})(\d{2})([NS])(\d{3})(\d{2})([EW])$/);
+            if (m) {
+                return {
+                    lat: (+m[1] + m[2] / 60) * (m[3] === "S" ? -1 : 1),
+                    lon: (+m[4] + m[5] / 60) * (m[6] === "W" ? -1 : 1)
+                };
+            }
+            // 55N170W - whole degrees, the oceanic ladder in field 15
+            m = tok.match(/^(\d{2})([NS])(\d{3})([EW])$/);
+            if (m) {
+                return {
+                    lat: +m[1] * (m[2] === "S" ? -1 : 1),
+                    lon: +m[3] * (m[4] === "W" ? -1 : 1)
+                };
+            }
+            // N55W170
+            m = tok.match(/^([NS])(\d{2})([EW])(\d{3})$/);
+            if (m) {
+                return {
+                    lat: +m[2] * (m[1] === "S" ? -1 : 1),
+                    lon: +m[4] * (m[3] === "W" ? -1 : 1)
+                };
+            }
+            return null;
+        }
+
+        function gcNm(a, b) {
+            const dLat = toRad(b.lat - a.lat);
+            const dLon = toRad(b.lon - a.lon);
+            const h = Math.sin(dLat / 2) ** 2 +
+                Math.cos(toRad(a.lat)) * Math.cos(toRad(b.lat)) * Math.sin(dLon / 2) ** 2;
+            return 2 * NM_PER_RAD * Math.asin(Math.min(1, Math.sqrt(h)));
+        }
+
+        function bearing(a, b) {
+            const dLon = toRad(b.lon - a.lon);
+            const y = Math.sin(dLon) * Math.cos(toRad(b.lat));
+            const x = Math.cos(toRad(a.lat)) * Math.sin(toRad(b.lat)) -
+                Math.sin(toRad(a.lat)) * Math.cos(toRad(b.lat)) * Math.cos(dLon);
+            return Math.atan2(y, x);
+        }
+
+        /** Distance from P to the great-circle segment A-B, clamped to the segment. */
+        function segNm(A, B, P) {
+            const len = gcNm(A, B) / NM_PER_RAD;
+            if (len === 0) return gcNm(A, P);
+            const d13 = gcNm(A, P) / NM_PER_RAD;
+            const xt = Math.asin(Math.sin(d13) * Math.sin(bearing(A, P) - bearing(A, B)));
+            const along = Math.acos(Math.max(-1, Math.min(1, Math.cos(d13) / Math.cos(xt))));
+            if (along < 0) return gcNm(A, P);
+            if (along > len) return gcNm(B, P);
+            return Math.abs(xt) * NM_PER_RAD;
+        }
+
+        /** Closest approach of a polyline to a point. */
+        function polylineNm(pts, P) {
+            if (!pts.length) return null;
+            if (pts.length === 1) return gcNm(pts[0], P);
+            let min = Infinity;
+            for (let i = 0; i < pts.length - 1; i += 1) {
+                min = Math.min(min, segNm(pts[i], pts[i + 1], P));
+            }
+            return min;
+        }
+
+        /**
+         * A circle or a polygon, if the NOTAM states one in a machine-readable form.
+         * Anything vaguer is left alone - this must not guess at an area.
+         */
+        function extractGeoArea(raw) {
+            const up = String(raw || "").toUpperCase();
+            const coordRe = /\b(\d{6}[NS]\d{7}[EW]|\d{4}[NS]\d{5}[EW])\b/g;
+
+            const rad = up.match(/(\d+(?:\.\d+)?)\s*NM\s+RADIUS/);
+            if (rad) {
+                // Take the coordinate nearest after the radius phrase.
+                const after = up.slice(up.indexOf(rad[0]));
+                const c = after.match(coordRe);
+                if (c && c.length) {
+                    const centre = decodeLatLon(c[0]);
+                    if (centre) return { kind: "circle", centre, radiusNm: parseFloat(rad[1]) };
+                }
+            }
+
+            const all = up.match(coordRe) || [];
+            const pts = all.map(decodeLatLon).filter(Boolean);
+            if (pts.length >= 3) return { kind: "polygon", points: pts };
+            if (pts.length >= 1) return { kind: "points", points: pts };
+            return null;
+        }
+
+        /** F) lower and G) upper, as flight levels. Null when not stated plainly. */
+        function parseVerticalBand(raw) {
+            const up = String(raw || "").toUpperCase();
+            const one = (label) => {
+                const m = up.match(new RegExp(label + "\\)\\s*(SFC|GND|UNL|FL\\s?\\d{3})"));
+                if (!m) return null;
+                const v = m[1].replace(/\s/g, "");
+                if (v === "SFC" || v === "GND") return 0;
+                if (v === "UNL") return 999;
+                return parseInt(v.slice(2), 10);
+            };
+            const lower = one("F");
+            const upper = one("G");
+            return (lower === null && upper === null) ? null : { lower, upper };
+        }
+
+        /**
+         * Does the filed route touch this area, laterally and vertically?
+         * `approx` is always true: the polyline is only the field 15 lat/long
+         * points, so the legs through named fixes are straight lines.
+         */
+        function geoCheck(area, routePts, levels) {
+            if (!area || routePts.length < 1) return null;
+
+            let minNm = null;
+            if (area.kind === "circle") {
+                minNm = polylineNm(routePts, area.centre);
+            } else {
+                let m = Infinity;
+                area.points.forEach((p) => { m = Math.min(m, polylineNm(routePts, p)); });
+                minNm = m === Infinity ? null : m;
+            }
+            if (minNm === null) return null;
+
+            const radius = area.kind === "circle" ? area.radiusNm : 0;
+            const lateralClear = minNm > radius;
+
+            let vertClear = null;
+            if (levels && area.vert && area.vert.upper !== null && area.vert.lower !== null) {
+                vertClear = (levels.min > area.vert.upper) || (levels.max < area.vert.lower);
+            }
+
+            return { minNm, radius, lateralClear, vertClear, approx: true };
+        }
+
         /**
          * The crossed FIRs in the order they are entered, so a card can show
          * "came from X, leaving to Y" - which is exactly what a clause phrased
@@ -756,25 +928,51 @@
             return { min: Math.min.apply(null, ls), max: Math.max.apply(null, ls) };
         }
 
-        // 5-letter tokens in a NOTAM that are probably reporting points rather
-        // than English. Crude on purpose - it is shown as evidence, never used
-        // to decide anything.
-        const FIX_STOPWORDS = new Set(["ROUTE","ROUTES","SHALL","NORTH","SOUTH","TRACK","TRACKS",
-            "ABOVE","BELOW","UNTIL","VALID","OTHER","THESE","WHICH","FILED","ADDED","AMEND",
-            "UNDER","MAINT","CLOSE","TOWER","RADAR","LIGHT","APRON","WORKS","DAILY","HOURS",
-            "TOTAL","LOCAL","FINAL","ENTRY","WHOLE","POINT","LIMIT","AREAS","ZONES","LEVEL",
-            "NIGHT","EXCPT","REFER","ISSUE","NOTAM","START","STOPS","AVBLE","CHECK","EFFCT",
-            "SFCFL","GROUP","PHASE","STAGE","ORDER","RULES","INFOR","ADVSY","OPERS"]);
+        // Words that put a five-letter token in a routing context. A fix is
+        // named as part of a route or a boundary; English prose is not.
+        const ROUTE_CUES = new Set(["DCT", "DIRECT", "VIA", "ROUTE", "ROUTES", "RTE",
+            "TRACK", "TRK", "AIRWAY", "AWY", "BTN", "BETWEEN", "NORTH", "SOUTH", "EAST",
+            "WEST", "OVER", "ABEAM", "JOIN", "CROSSING", "WAYPOINT", "FIX", "FIXES"]);
 
-        /** Five-letter fixes a NOTAM names, split into ours and not-ours. */
+        const PROSE_5 = new Set(["SHALL", "AMEND", "OTHER", "THREE", "USING", "CONST",
+            "CROSS", "FIRST", "STAND", "APRON", "RADIO", "JAPAN", "CRANE", "EXACT",
+            "CLIMB", "STATE", "ICING", "FLUID", "TEMPO", "PILOT", "PRIOR", "RIGHT",
+            "AFTER", "NOTES", "LEAST", "SIGNS", "BIRDS", "CHART", "WATCH", "ANGLE",
+            "EMERG", "GLOWS", "CREWS", "WHILE", "ALERT", "COLOR", "TABLE", "HOTEL",
+            "AIRAC", "ARTCC", "FICON", "TACAN", "CPDLC", "SEOUL", "LOGAN", "LOWER",
+            "UPPER", "TOTAL", "VALID", "UNTIL", "ABOVE", "BELOW", "LOCAL", "FINAL",
+            "LIMIT", "AREAS", "ZONES", "LEVEL", "NIGHT", "START", "CHECK", "GROUP",
+            "PHASE", "STAGE", "ORDER", "RULES", "MERIT", "FLIPS"]);
+
+        /**
+         * Five-letter fixes a NOTAM names, split into ours and not-ours.
+         *
+         * A token only counts when a routing cue sits within three tokens of it.
+         * Without that test the list filled with CONST, CRANE, AVOID and ATOLL -
+         * true five-letter uppercase words, no part of anybody's route.
+         */
         function namedFixes(body, ourFixes) {
+            const toks = String(body).split(/[^A-Z0-9\/]+/).filter(Boolean);
             const mine = [], theirs = [];
             const seen = new Set();
-            (body.match(/\b[A-Z]{5}\b/g) || []).forEach((tok) => {
-                if (seen.has(tok) || FIX_STOPWORDS.has(tok)) return;
-                seen.add(tok);
-                (ourFixes.has(tok) ? mine : theirs).push(tok);
-            });
+
+            for (let i = 0; i < toks.length; i += 1) {
+                const t = toks[i];
+                if (!/^[A-Z]{5}$/.test(t) || seen.has(t)) continue;
+                // A cue is not itself a fix, and a handful of words survive the
+                // context test because aviation prose puts them next to routing
+                // language anyway.
+                if (ROUTE_CUES.has(t) || PROSE_5.has(t)) continue;
+
+                let cued = false;
+                for (let j = Math.max(0, i - 3); j <= Math.min(toks.length - 1, i + 3); j += 1) {
+                    if (j !== i && ROUTE_CUES.has(toks[j])) { cued = true; break; }
+                }
+                if (!cued) continue;
+
+                seen.add(t);
+                (ourFixes.has(t) ? mine : theirs).push(t);
+            }
             return { mine, theirs: theirs.slice(0, 12) };
         }
 
@@ -901,6 +1099,13 @@
                 }
             }
             const fixes = namedFixes(body, ctx.route.fixes);
+
+            // Areas stated as a centre + radius (or a coordinate list) are the
+            // one place a real determination is possible: distance and altitude
+            // are arithmetic, not reading comprehension.
+            const area = extractGeoArea(raw);
+            if (area) area.vert = parseVerticalBand(raw);
+            const geo = geoCheck(area, ctx.route.pointList, ctx.levels);
             const inWindow = timeState !== "OUTSIDE";
             // En route = the airspace we fly through, or a NOTAM that names a
             // point we filed. Airport NOTAMs are the other bucket.
@@ -920,6 +1125,8 @@
                 navaidHits: weak,
                 limits,
                 limitWords,
+                area,
+                geo,
                 firContext,
                 namedOurs: fixes.mine,
                 namedTheirs: fixes.theirs,
@@ -967,6 +1174,7 @@
                 routeTokenCount: ctx.route.fixes.size + ctx.route.airways.size + ctx.route.points.size,
                 firs: Array.from(ctx.firs),
                 firSeq: ctx.firSeq,
+                routePointCount: ctx.route.pointList.length,
                 levels: ctx.levels,
                 total: notams.length,
                 outside,
@@ -1627,6 +1835,35 @@ E) NAV ILS RWY 26R CAT II/III NA`
                                 }
                                 why.push(`\uc81c\ud55c \ud45c\ud604 <span class="text-rose-300">${r.result.limits.join(', ')}</span> \ud3ec\ud568`
                                     + q(r.result.limitQuotes));
+
+                                // Distance and altitude are arithmetic. This is the one
+                                // place the app states a result rather than evidence -
+                                // hedged only by the polyline being an approximation.
+                                const g = r.result.geo;
+                                if (g) {
+                                    const a = r.result.area;
+                                    const dd = (v) => {
+                                        const d = Math.floor(Math.abs(v));
+                                        const m = Math.round((Math.abs(v) - d) * 60);
+                                        return `${d}\u00b0${String(m).padStart(2, '0')}'`;
+                                    };
+                                    const where = a.kind === 'circle'
+                                        ? `\ubc18\uacbd ${a.radiusNm}NM \u00b7 \uc911\uc2ec ${dd(a.centre.lat)}${a.centre.lat < 0 ? 'S' : 'N'} ${dd(a.centre.lon)}${a.centre.lon < 0 ? 'W' : 'E'}`
+                                        : `\uc88c\ud45c ${a.points.length}\uac1c\ub85c \uc815\uc758\ub41c \uad6c\uc5ed`;
+                                    const lat = g.lateralClear
+                                        ? `<span class="text-emerald-300">\uad6c\uc5ed \ubc16</span> \u2014 \ucd5c\uadfc\uc811 ${Math.round(g.minNm).toLocaleString()} NM`
+                                        : `<span class="text-rose-300">\uad6c\uc5ed \ub0b4/\uadfc\uc811</span> \u2014 \ucd5c\uadfc\uc811 ${Math.round(g.minNm).toLocaleString()} NM`;
+                                    let vert = '';
+                                    if (g.vertClear !== null && a.vert) {
+                                        const band = `FL${String(a.vert.lower).padStart(3, '0')} ~ ${a.vert.upper >= 999 ? 'UNL' : 'FL' + a.vert.upper}`;
+                                        vert = `<div class="mt-1">\uace0\ub3c4 ${band} \u00b7 \uacc4\ud68d FL${xc.levels.min}~FL${xc.levels.max} \u2014 ${g.vertClear
+                                            ? '<span class="text-emerald-300">\ubbf8\uad50\ucc28</span>'
+                                            : '<span class="text-rose-300">\uacb9\uce68</span>'}</div>`;
+                                    }
+                                    why.push(`<span class="text-slate-300">\uae30\ud558 \uacc4\uc0b0</span> \u2014 ${where}`
+                                        + `<div class="mt-1">${lat}</div>${vert}`
+                                        + `<div class="mt-1 text-[11px] text-slate-500">\ud56d\ub85c\ub294 15\ud56d \uc704\uacbd\ub3c4 \uc9c0\uc810 ${xc.routePointCount}\uac1c\ub97c \uc774\uc740 \uadfc\uc0ac\uc120\uc785\ub2c8\ub2e4. \uba85\uba85 \uc9c0\uc810\uc740 \ubb38\uc11c\uc5d0 \uc88c\ud45c\uac00 \uc5c6\uc2b5\ub2c8\ub2e4.</div>`);
+                                }
 
                                 // The restriction and the route mention never share a
                                 // line. Say so - it is usually the difference between
