@@ -1,8 +1,8 @@
-const CACHE_NAME = 'notam-efb-v1';
+const CACHE_NAME = 'notam-efb-v2';
 const ASSETS = [
   './',
   './index.html',
-  './notam_engine.js',
+  './notam_engine.js?v=2.1',
   './manifest.json',
   'https://cdn.tailwindcss.com',
   'https://unpkg.com/lucide@latest',
@@ -11,12 +11,10 @@ const ASSETS = [
 ];
 
 self.addEventListener('install', (e) => {
-  e.waitUntil(
-    caches.open(CACHE_NAME).then((cache) => {
-      return cache.addAll(ASSETS).catch((err) => console.log('Asset cache partial:', err));
-    })
-  );
   self.skipWaiting();
+  e.waitUntil(
+    caches.open(CACHE_NAME).then((cache) => cache.addAll(ASSETS).catch(() => {}))
+  );
 });
 
 self.addEventListener('activate', (e) => {
@@ -27,13 +25,21 @@ self.addEventListener('activate', (e) => {
           if (k !== CACHE_NAME) return caches.delete(k);
         })
       );
-    })
+    }).then(() => self.clients.claim())
   );
-  self.clients.claim();
 });
 
 self.addEventListener('fetch', (e) => {
+  // Network first, fallback to cache
   e.respondWith(
-    caches.match(e.request).then((res) => res || fetch(e.request).catch(() => res))
+    fetch(e.request)
+      .then((res) => {
+        if (res && res.status === 200 && e.request.method === 'GET') {
+          const clone = res.clone();
+          caches.open(CACHE_NAME).then((c) => c.put(e.request, clone));
+        }
+        return res;
+      })
+      .catch(() => caches.match(e.request))
   );
 });
