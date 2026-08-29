@@ -952,7 +952,8 @@
          * true five-letter uppercase words, no part of anybody's route.
          */
         function namedFixes(body, ourFixes) {
-            const toks = String(body).split(/[^A-Z0-9\/]+/).filter(Boolean);
+            // Split on "/" as well: "Y722/B576" is two airways, not one token.
+            const toks = String(body).split(/[^A-Z0-9]+/).filter(Boolean);
             const mine = [], theirs = [];
             const seen = new Set();
 
@@ -999,6 +1000,79 @@
                 kind[m] === "limit"
                     ? '<span class="bg-rose-500/25 text-rose-200 rounded px-0.5">' + m + '</span>'
                     : '<span class="bg-amber-500/25 text-amber-200 rounded px-0.5">' + m + '</span>');
+        }
+
+        /**
+         * The D) field: the daily window a measure is actually live.
+         *
+         *   D) 1930-2200                     -> one window
+         *   D) MON-FRI 1500-0600             -> window plus a day qualifier
+         *   D) 23-24 26 29-31 1430/2100      -> window plus a date list
+         *
+         * Only the clock range is evaluated. Day and date qualifiers are
+         * reported but not judged - getting those wrong would be worse than
+         * leaving them to the reader.
+         */
+        function parseDailyWindow(raw) {
+            const m = String(raw || "").toUpperCase().match(/^D\)\s*([^\r\n]+)/m);
+            if (!m) return null;
+            const spec = m[1].trim();
+            const windows = [];
+            const re = /(\d{4})\s*[-\/]\s*(\d{4})/g;
+            let g;
+            while ((g = re.exec(spec)) !== null) {
+                const a = +g[1].slice(0, 2) * 60 + +g[1].slice(2);
+                const b = +g[2].slice(0, 2) * 60 + +g[2].slice(2);
+                if (a < 1440 && b < 1440) windows.push([a, b]);
+            }
+            if (!windows.length) return null;
+            const dayQualified = /\b(MON|TUE|WED|THU|FRI|SAT|SUN)\b/.test(spec) ||
+                /^\d{1,2}(-\d{1,2})?(\s|$)/.test(spec);
+            return { spec, windows, dayQualified };
+        }
+
+        /** Minutes past midnight UTC at which the flight enters `fir`. */
+        function firEntryMinutes(fullText, fpl, firSeq, fir) {
+            if (!fpl || !fpl.depTime) return null;
+            const e = firSeq.find((x) => x.fir === fir);
+            if (!e || !/^\d{4}$/.test(e.eet)) return null;
+            const dep = +fpl.depTime.slice(0, 2) * 60 + +fpl.depTime.slice(2);
+            const eet = +e.eet.slice(0, 2) * 60 + +e.eet.slice(2);
+            return (dep + eet) % 1440;
+        }
+
+        /** Is `min` inside any window? Windows may run past midnight. */
+        function inAnyWindow(min, windows) {
+            return windows.some(([a, b]) =>
+                a <= b ? (min >= a && min <= b) : (min >= a || min <= b));
+        }
+
+        const hhmm = (min) =>
+            String(Math.floor(min / 60)).padStart(2, "0") + ":" + String(min % 60).padStart(2, "0");
+
+        /**
+         * Airways a NOTAM names, split into ours and not-ours. Same context test
+         * as the fixes, plus flight levels are excluded - F390 is not an airway.
+         */
+        function namedAirways(body, ourAirways) {
+            // Split on "/" as well: "Y722/B576" is two airways, not one token.
+            const toks = String(body).split(/[^A-Z0-9]+/).filter(Boolean);
+            const mine = [], theirs = [];
+            const seen = new Set();
+            for (let i = 0; i < toks.length; i += 1) {
+                const t = toks[i];
+                if (!/^[A-Z]{1,2}\d{1,3}$/.test(t) || seen.has(t)) continue;
+                if (/^F\d{3}$/.test(t)) continue;              // a level, not a route
+                if (i > 0 && toks[i - 1] === "FL") continue;
+                let cued = false;
+                for (let j = Math.max(0, i - 3); j <= Math.min(toks.length - 1, i + 3); j += 1) {
+                    if (j !== i && ROUTE_CUES.has(toks[j])) { cued = true; break; }
+                }
+                if (!cued) continue;
+                seen.add(t);
+                (ourAirways.has(t) ? mine : theirs).push(t);
+            }
+            return { mine, theirs: theirs.slice(0, 10) };
         }
 
         /**
@@ -1099,6 +1173,22 @@
                 }
             }
             const fixes = namedFixes(body, ctx.route.fixes);
+            const airways = namedAirways(body, ctx.route.airways);
+
+            // The daily window, against the moment we enter the issuing FIR.
+            const daily = parseDailyWindow(raw);
+            let dailyCheck = null;
+            if (daily && firMatch) {
+                const entry = firEntryMinutes(ctx.fullText, ctx.fpl, ctx.firSeq, item.station);
+                if (entry !== null) {
+                    dailyCheck = {
+                        spec: daily.spec,
+                        entry,
+                        inWindow: inAnyWindow(entry, daily.windows),
+                        dayQualified: daily.dayQualified
+                    };
+                }
+            }
 
             // Areas stated as a centre + radius (or a coordinate list) are the
             // one place a real determination is possible: distance and altitude
@@ -1130,6 +1220,8 @@
                 firContext,
                 namedOurs: fixes.mine,
                 namedTheirs: fixes.theirs,
+                airwaysTheirs: airways.theirs,
+                dailyCheck,
                 routeQuotes,
                 limitQuotes,
                 separated,
@@ -1147,6 +1239,8 @@
                 airports: extractFlightAirports(fullText, fpl),
                 firs: extractCrossedFirs(fullText),
                 firSeq: extractFirSequence(fullText),
+                fullText,
+                fpl,
                 levels: extractLevelBand(fpl && fpl.route ? fpl.route : routeText),
                 route: extractRouteTokens(fpl && fpl.route ? fpl.route : routeText)
             };
@@ -1809,6 +1903,20 @@ E) NAV ILS RWY 26R CAT II/III NA`
                                     ? `\uc720\ud6a8\uae30\uac04 <span class="text-slate-300">${r.item.valid}</span> \u2014 \ube44\ud589\ucc3d\uacfc \uacb9\uce68`
                                     : `\uc720\ud6a8\uae30\uac04 <span class="text-slate-300">${r.item.valid}</span> \u2014 \uc2dc\uac04 \ud310\ub2e8 \ubd88\uac00`);
 
+                                // The header validity can span months while the measure
+                                // itself only runs a couple of hours a day. Compare against
+                                // the moment we actually enter the issuing FIR.
+                                const dc = r.result.dailyCheck;
+                                if (dc) {
+                                    why.push(`\ud65c\uc131 \uc2dc\uac04\ub300 <span class="text-slate-300">D) ${dc.spec}</span> \u00b7 ${r.item.station} \uc9c4\uc785 <span class="text-slate-300">${hhmm(dc.entry)}Z</span> \u2014 `
+                                        + (dc.inWindow
+                                            ? '<span class="text-rose-300">\ucc3d \uc548</span>'
+                                            : '<span class="text-emerald-300">\ucc3d \ubc16</span>')
+                                        + (dc.dayQualified
+                                            ? '<div class="mt-1 text-[11px] text-slate-500">\uc694\uc77c/\uc77c\uc790 \uc870\uac74\uc774 \ud568\uaed8 \uc788\uc2b5\ub2c8\ub2e4 \u2014 \uc2dc\uac01\ub9cc \ub300\uc870\ud588\uc73c\ubbc0\ub85c \uc9c1\uc811 \ud655\uc778\ud558\uc2ed\uc2dc\uc624.</div>'
+                                            : ''));
+                                }
+
                                 if (r.result.firMatch) {
                                     // Clauses like "FROM WINNIPEG FIR TO VANCOUVER FIR"
                                     // hinge on where we entered this FIR and where we
@@ -1821,6 +1929,9 @@ E) NAV ILS RWY 26R CAT II/III NA`
                                         + (xc.levels
                                             ? `<div class="mt-1 font-mono text-[11px] text-slate-400">\uacc4\ud68d \uace0\ub3c4 \ubc94\uc704 FL${xc.levels.min} ~ FL${xc.levels.max} (15\ud56d)</div>`
                                             : ''));
+                                }
+                                if (r.result.airwaysTheirs.length) {
+                                    why.push(`<span class="text-slate-500">\uc774 NOTAM\uc774 \uc9c0\uc815\ud55c \ud56d\uacf5\ub85c \uc911 \ub0b4 \ud56d\ub85c\uc5d0 \uc5c6\ub294 \uac83: ${r.result.airwaysTheirs.join(', ')}</span>`);
                                 }
                                 if (r.result.namedTheirs.length) {
                                     why.push(`<span class="text-slate-500">\uc774 NOTAM\uc774 \uc9c0\uc815\ud55c \uc9c0\uc810 \uc911 \ub0b4 \ud56d\ub85c\uc5d0 \uc5c6\ub294 \uac83: ${r.result.namedTheirs.join(', ')}</span>`
