@@ -655,6 +655,34 @@
             return { fixes, airways, navaids, points };
         }
 
+        /**
+         * FIRs the flight enters, from field 18 EET/.
+         *
+         *   EET/KZBW0002 CZUL0040 CZWG0216 CZEG0313 PAZA0555 RJJJ1045 RKRR1400
+         *
+         * Airspace NOTAMs are filed under these codes, and they are the ones that
+         * never mention a waypoint - danger areas, GPS outages, datalink mandates.
+         */
+        function extractCrossedFirs(fullText) {
+            const set = new Set();
+            // Read the whole EET/ value, up to the next field 18 keyword. The
+            // list interleaves entries that are not FIRs - ADIZ crossings and
+            // longitude estimates such as 160W0614 - and the previous scan
+            // stopped dead at the first of them, losing every Pacific and US
+            // FIR that followed (KZAK, KZSE, KZOA, KZLA on the LAX leg).
+            const m = String(fullText).toUpperCase()
+                .match(/\bEET\/([\s\S]*?)(?=\s+[A-Z]{2,}\/|\)|$)/);
+            if (!m) return set;
+
+            const re = /\b([A-Z]{4})\d{4}\b/g;
+            let g;
+            while ((g = re.exec(m[1])) !== null) {
+                if (g[1] === "ADIZ") continue;   // a boundary estimate, not an FIR
+                set.add(g[1]);
+            }
+            return set;
+        }
+
         /** Airports this flight actually touches, from the flight plan. */
         function extractFlightAirports(fullText, fpl) {
             const set = new Set();
@@ -724,17 +752,28 @@
                 if (re.test(body)) limits.push(label);
             }
 
+            const firMatch = ctx.firs.has(item.station);
             const inWindow = timeState !== "OUTSIDE";
-            const relevant = inWindow && (stationMatch || strong.length > 0);
-            const needsReview = relevant && limits.length > 0;
+            // En route = the airspace we fly through, or a NOTAM that names a
+            // point we filed. Airport NOTAMs are the other bucket.
+            const routeRelated = inWindow && !stationMatch && (firMatch || strong.length > 0);
+            const airportRelated = inWindow && stationMatch;
+
+            // "Needs review" means en-route only. Ground NOTAMs at our own
+            // airports are counted separately rather than folded in here - they
+            // swamped the list, and the station tabs already cover them.
+            const needsReview = routeRelated && limits.length > 0;
 
             return {
                 timeState,
                 stationMatch,
+                firMatch,
                 routeHits: strong,
                 navaidHits: weak,
                 limits,
-                relevant,
+                routeRelated,
+                airportRelated,
+                relevant: routeRelated || airportRelated,
                 needsReview
             };
         }
@@ -744,15 +783,17 @@
             const ctx = {
                 window: computeFlightWindow(fullText, fpl),
                 airports: extractFlightAirports(fullText, fpl),
+                firs: extractCrossedFirs(fullText),
                 route: extractRouteTokens(fpl && fpl.route ? fpl.route : routeText)
             };
 
             const rows = [];
-            let outside = 0, relevant = 0, review = 0;
+            let outside = 0, airportCount = 0, routeCount = 0, review = 0;
             for (const n of notams) {
                 const r = crossCheckNotam(n, ctx);
                 if (r.timeState === "OUTSIDE") outside++;
-                if (r.relevant) relevant++;
+                if (r.airportRelated) airportCount++;
+                if (r.routeRelated) routeCount++;
                 if (r.needsReview) { review++; rows.push({ item: n, result: r }); }
             }
 
@@ -767,9 +808,11 @@
                 window: ctx.window,
                 airports: Array.from(ctx.airports),
                 routeTokenCount: ctx.route.fixes.size + ctx.route.airways.size + ctx.route.points.size,
+                firs: Array.from(ctx.firs),
                 total: notams.length,
                 outside,
-                relevant,
+                airportCount,
+                routeCount,
                 review,
                 rows: rows.slice(0, 40)
             };
@@ -1362,11 +1405,11 @@ E) NAV ILS RWY 26R CAT II/III NA`
                                 <div class="text-lg font-bold text-slate-400">${xc.outside}</div>
                             </div>
                             <div class="bg-slate-950 border border-slate-800 rounded-lg p-2.5">
-                                <div class="text-[10px] text-slate-500">항로·공항 관련</div>
-                                <div class="text-lg font-bold text-amber-300">${xc.relevant}</div>
+                                <div class="text-[10px] text-slate-500">공항 NOTAM</div>
+                                <div class="text-lg font-bold text-slate-300">${xc.airportCount}</div>
                             </div>
                             <div class="bg-slate-950 border border-rose-900/70 rounded-lg p-2.5">
-                                <div class="text-[10px] text-rose-400/80">확인 필요</div>
+                                <div class="text-[10px] text-rose-400/80">항로 확인 필요</div>
                                 <div class="text-lg font-bold text-rose-300">${xc.review}</div>
                             </div>
                         </div>
@@ -1375,12 +1418,16 @@ E) NAV ILS RWY 26R CAT II/III NA`
                             대조 기준 — 비행창: <span class="text-slate-300">${fmt(xc.window.start)} ~ ${fmt(xc.window.end)}</span>
                             · 공항: <span class="text-slate-300">${xc.airports.join(', ') || '-'}</span>
                             · 항로 지점/항로 수: <span class="text-slate-300">${xc.routeTokenCount}</span>
+                            <br>통과 FIR(18항 EET/): <span class="text-slate-300">${xc.firs.join(', ') || '-'}</span>
                         </div>
 
                         <p class="text-[11px] text-slate-400 leading-relaxed">
-                            “확인 필요”는 <strong class="text-slate-300">위반이 아니라</strong>,
-                            비행 시간대에 유효하면서 우리 항로나 공항을 직접 언급하고 제한 표현을 포함한 NOTAM이라는 뜻입니다.
-                            충족 여부는 기계가 판단하지 않으므로 반드시 직접 읽으십시오.
+                            “항로 확인 필요”는 <strong class="text-slate-300">위반이 아니라</strong>,
+                            비행 시간대에 유효하면서 <strong class="text-slate-300">통과 FIR에서 발행되었거나 15항 항로의 지점·항로를 언급</strong>하고
+                            제한 표현을 포함한 NOTAM이라는 뜻입니다. 충족 여부는 기계가 판단하지 않으므로 반드시 직접 읽으십시오.
+                            <br class="hidden sm:block">
+                            공항 NOTAM(출발·도착·교체·회항지)은 이 목록에 들어오지 않지만 <strong class="text-slate-300">사라지지 않습니다</strong> —
+                            위 “공항 NOTAM” 집계와 아래 공항별 탭에서 별도로 확인하십시오.
                         </p>
 
                         ${xc.rows.length ? `
@@ -1390,7 +1437,7 @@ E) NAV ILS RWY 26R CAT II/III NA`
                                     <tr>
                                         <th class="p-2.5">NOTAM</th>
                                         <th class="p-2.5">공항</th>
-                                        <th class="p-2.5">항로 일치</th>
+                                        <th class="p-2.5">근거</th>
                                         <th class="p-2.5">제한 표현</th>
                                         <th class="p-2.5">유효기간</th>
                                     </tr>
@@ -1400,7 +1447,9 @@ E) NAV ILS RWY 26R CAT II/III NA`
                                         <tr class="hover:bg-slate-800/30">
                                             <td class="p-2.5 text-amber-300 whitespace-nowrap">${r.item.id}</td>
                                             <td class="p-2.5 text-slate-300">${r.result.stationMatch ? `<span class="text-emerald-300">${r.item.station}</span>` : r.item.station}</td>
-                                            <td class="p-2.5 text-slate-300">${r.result.routeHits.slice(0, 4).join(', ') || '<span class="text-slate-600">-</span>'}</td>
+                                            <td class="p-2.5 text-slate-300">${r.result.routeHits.length
+                                                ? r.result.routeHits.slice(0, 5).join(', ')
+                                                : '<span class="text-slate-400">통과 FIR</span>'}</td>
                                             <td class="p-2.5 text-rose-300">${r.result.limits.join(', ')}</td>
                                             <td class="p-2.5 text-slate-500 whitespace-nowrap">${r.item.valid}</td>
                                         </tr>`).join('')}
@@ -1408,7 +1457,7 @@ E) NAV ILS RWY 26R CAT II/III NA`
                             </table>
                         </div>
                         ${xc.review > xc.rows.length ? `<p class="text-[11px] text-slate-500">상위 ${xc.rows.length}건만 표시됩니다. 전체는 아래 NOTAM 목록에서 확인하십시오.</p>` : ''}
-                        ` : `<p class="text-xs text-slate-400">비행 시간대·항로·제한 표현이 모두 걹치는 NOTAM은 없습니다.</p>`}
+                        ` : `<p class="text-xs text-slate-400">비행 시간대·통과 공역·제한 표현이 모두 걹치는 항로 NOTAM은 없습니다. 공항 NOTAM은 위 집계와 공항별 탭을 확인하십시오.</p>`}
                     </div>`;
                 })()}
 
