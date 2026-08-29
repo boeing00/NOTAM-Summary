@@ -241,6 +241,7 @@
     <script>
         // Global State
         let allParsedNotams = [];
+        let lastDocText = "";   // source text of whatever is on screen
         let userShadingMap = {}; // notamId -> boolean (true: shaded, false: active)
         let currentStationTab = 'ALL';
         let currentReasonFilter = 'ALL';
@@ -575,6 +576,205 @@
             return list;
         }
 
+        /* ====================================================================
+         * FPL <-> NOTAM cross-check
+         *
+         * What this does NOT do: decide compliance. Whether a flight plan
+         * satisfies a restriction written in prose ("SHALL ROUTE ON OR NORTH OF
+         * GOATS") is not something this can determine, and claiming otherwise is
+         * the defect this replaces.
+         *
+         * What it does: compute the four things that ARE decidable from the
+         * document, and show the evidence for each.
+         *
+         *   TIME   the NOTAM's validity against the filed flight window
+         *   STN    the NOTAM's station against our airports (ADEP/ADES/ALTN/RALT)
+         *   ROUTE  fixes and airways from field 15 appearing in the NOTAM's E) text
+         *   LIMIT  restrictive wording (CLSD, U/S, SHALL, PROHIBITED, ...)
+         *
+         * These packages carry no Q) line, so there is no machine-readable level
+         * band or radius to work with - only the header validity and the E) text.
+         * ==================================================================== */
+
+        const MONTHS = { JAN:0, FEB:1, MAR:2, APR:3, MAY:4, JUN:5, JUL:6,
+                         AUG:7, SEP:8, OCT:9, NOV:10, DEC:11 };
+
+        /** "29AUG26 03:00" -> Date (UTC). Returns null if unparseable. */
+        function parseNotamStamp(str) {
+            const m = String(str || "").trim()
+                .match(/^(\d{2})([A-Z]{3})(\d{2})\s+(\d{2}):(\d{2})$/);
+            if (!m || !(m[2] in MONTHS)) return null;
+            return new Date(Date.UTC(2000 + +m[3], MONTHS[m[2]], +m[1], +m[4], +m[5]));
+        }
+
+        /**
+         * The window the aeroplane is actually airborne, from the flight plan:
+         * DOF/YYMMDD + field 13 EOBT, running for the field 16 total EET.
+         */
+        function computeFlightWindow(fullText, fpl) {
+            if (!fpl || !fpl.depTime) return null;
+            const dofM = String(fullText).toUpperCase().match(/\bDOF\/(\d{6})\b/);
+            if (!dofM) return null;
+
+            const yy = +dofM[1].slice(0, 2), mm = +dofM[1].slice(2, 4), dd = +dofM[1].slice(4, 6);
+            const start = new Date(Date.UTC(2000 + yy, mm - 1, dd,
+                +fpl.depTime.slice(0, 2), +fpl.depTime.slice(2)));
+
+            let mins = 0;
+            if (fpl.eet && /^\d{4}$/.test(fpl.eet)) {
+                mins = (+fpl.eet.slice(0, 2)) * 60 + (+fpl.eet.slice(2));
+            }
+            // A little margin either side: taxi out, holding, and the approach.
+            const end = new Date(start.getTime() + (mins + 60) * 60000);
+            return { start: new Date(start.getTime() - 60 * 60000), end };
+        }
+
+        /** Fixes, airways and navaids actually filed in field 15. */
+        function extractRouteTokens(routeText) {
+            const fixes = new Set();      // 5-letter reporting points
+            const airways = new Set();    // A342, R220, Y697, L512, J124 ...
+            const navaids = new Set();    // 3-letter, weaker evidence
+            const points = new Set();     // 55N170W, N62W130
+
+            // `routeText` must already be field 15 alone - see parseIcaoFpl.
+            const seg = String(routeText || "").toUpperCase();
+
+            for (const rawTok of seg.split(/[\s/]+/)) {
+                const tok = rawTok.replace(/[(),]/g, "");
+                if (!tok) continue;
+                if (/^\d{2}[NS]\d{3}[EW]$/.test(tok) || /^[NS]\d{2}[EW]\d{3}$/.test(tok)) {
+                    points.add(tok);
+                } else if (/^[A-Z]\d{1,3}$/.test(tok) || /^[A-Z]{2}\d{1,3}$/.test(tok)) {
+                    airways.add(tok);
+                } else if (/^[A-Z]{5}$/.test(tok)) {
+                    fixes.add(tok);
+                } else if (/^[A-Z]{3}$/.test(tok) && tok !== "DCT" && tok !== "IFR" && tok !== "VFR") {
+                    navaids.add(tok);
+                }
+            }
+            return { fixes, airways, navaids, points };
+        }
+
+        /** Airports this flight actually touches, from the flight plan. */
+        function extractFlightAirports(fullText, fpl) {
+            const set = new Set();
+            if (fpl) {
+                if (fpl.dep) set.add(fpl.dep);
+                if (fpl.dest) set.add(fpl.dest);
+                (fpl.altns || []).forEach((a) => set.add(a));
+            }
+            // Field 18 en-route alternates.
+            const ralt = String(fullText).toUpperCase().match(/\bRALT\/((?:[A-Z]{4}\s*)+)/);
+            if (ralt) ralt[1].trim().split(/\s+/).forEach((a) => { if (a.length === 4) set.add(a); });
+            return set;
+        }
+
+        const LIMIT_PATTERNS = [
+            [/\bCLSD\b|\bCLOSED\b/, "폐쇄"],
+            [/\bU\/S\b|\bOUT OF SERVICE\b|\bOTS\b/, "운용불능"],
+            [/\bNOT AVBL\b|\bUNAVBL\b|\bNOT AVAILABLE\b/, "사용불가"],
+            [/\bPROHIBITED\b|\bFORBIDDEN\b/, "금지"],
+            [/\bSHALL\b|\bMUST\b|\bMANDATORY\b|\bREQ\b/, "의무사항"],
+            [/\bRESTRICTED\b|\bRESTRICTION\b|\bLIMITED TO\b/, "제한"],
+            [/\bWIP\b|\bWORK IN PROGRESS\b|\bCONSTRUCTION\b/, "공사"]
+        ];
+
+        /**
+         * Cross-checks one NOTAM against the flight. Returns evidence, never a
+         * verdict: `needsReview` means "a human has to read this", not "violation".
+         */
+        function crossCheckNotam(item, ctx) {
+            const raw = String(item.raw || "").toUpperCase();
+            const eIdx = raw.indexOf("E)");
+            const body = eIdx >= 0 ? raw.slice(eIdx) : raw;
+
+            // --- TIME -------------------------------------------------------
+            let timeState = "UNKNOWN";
+            if (ctx.window) {
+                const parts = String(item.valid || "").split("~");
+                const from = parseNotamStamp(parts[0]);
+                const toRaw = (parts[1] || "").trim();
+                const perm = /^(UFN|PERM)/i.test(toRaw);
+                const to = perm ? null : parseNotamStamp(toRaw);
+                if (from) {
+                    const startsAfter = from > ctx.window.end;
+                    const endsBefore = !perm && to && to < ctx.window.start;
+                    timeState = (startsAfter || endsBefore) ? "OUTSIDE" : "OVERLAP";
+                }
+            }
+
+            // --- STATION ----------------------------------------------------
+            const stationMatch = ctx.airports.has(item.station);
+
+            // --- ROUTE ------------------------------------------------------
+            // 5-letter fixes, airways and lat/long points are strong evidence.
+            // 3-letter navaids are reported separately: they collide with plain
+            // English too easily to be treated the same way.
+            const strong = [];
+            const weak = [];
+            const hit = (tok) => new RegExp("\\b" + tok + "\\b").test(body);
+            ctx.route.fixes.forEach((t) => { if (hit(t)) strong.push(t); });
+            ctx.route.airways.forEach((t) => { if (hit(t)) strong.push(t); });
+            ctx.route.points.forEach((t) => { if (hit(t)) strong.push(t); });
+            ctx.route.navaids.forEach((t) => { if (hit(t)) weak.push(t); });
+
+            // --- LIMIT ------------------------------------------------------
+            const limits = [];
+            for (const [re, label] of LIMIT_PATTERNS) {
+                if (re.test(body)) limits.push(label);
+            }
+
+            const inWindow = timeState !== "OUTSIDE";
+            const relevant = inWindow && (stationMatch || strong.length > 0);
+            const needsReview = relevant && limits.length > 0;
+
+            return {
+                timeState,
+                stationMatch,
+                routeHits: strong,
+                navaidHits: weak,
+                limits,
+                relevant,
+                needsReview
+            };
+        }
+
+        /** Runs the cross-check over every parsed NOTAM and summarises it. */
+        function buildCrossCheck(fullText, fpl, routeText, notams) {
+            const ctx = {
+                window: computeFlightWindow(fullText, fpl),
+                airports: extractFlightAirports(fullText, fpl),
+                route: extractRouteTokens(fpl && fpl.route ? fpl.route : routeText)
+            };
+
+            const rows = [];
+            let outside = 0, relevant = 0, review = 0;
+            for (const n of notams) {
+                const r = crossCheckNotam(n, ctx);
+                if (r.timeState === "OUTSIDE") outside++;
+                if (r.relevant) relevant++;
+                if (r.needsReview) { review++; rows.push({ item: n, result: r }); }
+            }
+
+            // Most evidence first, then by station.
+            rows.sort((a, b) =>
+                (b.result.routeHits.length - a.result.routeHits.length) ||
+                (b.result.limits.length - a.result.limits.length) ||
+                a.item.station.localeCompare(b.item.station));
+
+            return {
+                ok: !!(ctx.window && (ctx.route.fixes.size || ctx.route.airways.size)),
+                window: ctx.window,
+                airports: Array.from(ctx.airports),
+                routeTokenCount: ctx.route.fixes.size + ctx.route.airways.size + ctx.route.points.size,
+                total: notams.length,
+                outside,
+                relevant,
+                review,
+                rows: rows.slice(0, 40)
+            };
+        }
+
         /**
          * Reads departure, destination and alternates straight out of the filed
          * ICAO flight plan.
@@ -593,13 +793,17 @@
             const flat = m[0].replace(/^\(/, "").replace(/\)$/, "").replace(/\s+/g, " ").trim();
             const fields = flat.split(/ -/);
 
-            let dep = null, depTime = null, dest = null, eet = null, altns = [];
+            let dep = null, depTime = null, dest = null, eet = null, altns = [], route = "";
             for (const f of fields) {
                 const t = f.trim();
                 if (!dep) {
                     const d = t.match(/^([A-Z]{4})(\d{4})$/);
                     if (d) { dep = d[1]; depTime = d[2]; continue; }
                 }
+                // Field 15 is the one immediately after field 13. Taking it by
+                // position keeps field 18 out - RIF/ carries a contingency route
+                // and A/WHITE is the paint scheme, neither of which is filed track.
+                if (dep && !dest && !route) { route = t; }
                 if (dep && !dest) {
                     const a = t.match(/^([A-Z]{4})(\d{4})((?: +[A-Z]{4})*)$/);
                     if (a) {
@@ -612,7 +816,7 @@
             if (!dep || !dest) return null;
 
             const cs = flat.match(/^FPL-([A-Z0-9]{3,8})-/);
-            return { dep, depTime, dest, eet, altns, callsign: cs ? cs[1] : null };
+            return { dep, depTime, dest, eet, altns, route, callsign: cs ? cs[1] : null };
         }
 
         /**
@@ -1033,6 +1237,7 @@ E) NAV ILS RWY 26R CAT II/III NA`
                 
                 // Parse full raw list
                 allParsedNotams = parseAllRawNotamsWithShading(fullText);
+                lastDocText = fullText;
                 userShadingMap = {};
 
                 renderExecutiveReport(briefing);
@@ -1125,6 +1330,87 @@ E) NAV ILS RWY 26R CAT II/III NA`
                         </div>
                     ` : ''}
                 </div>
+
+                <!-- 3. Computed cross-check: evidence, not a verdict -->
+                ${(() => {
+                    const xc = buildCrossCheck(lastDocText, parseIcaoFpl(lastDocText), b.meta.routeText, allParsedNotams);
+                    if (!xc.ok) {
+                        return `<div class="p-4 bg-slate-950/70 border border-slate-800 rounded-xl text-xs text-slate-400 leading-relaxed">
+                            <strong class="text-slate-300 block mb-1">FPL ↔ NOTAM 자동 교차 대조: 수행 불가</strong>
+                            제출 비행계획서의 항로(15항) 또는 비행일자(DOF)를 문서에서 읽지 못했습니다.
+                            대조할 기준이 없으므로 아래 NOTAM 전수를 직접 확인하십시오.
+                        </div>`;
+                    }
+                    const fmt = (d) => d.toISOString().slice(0, 16).replace('T', ' ') + 'Z';
+                    return `
+                    <div class="space-y-3">
+                        <div class="flex flex-wrap items-center justify-between gap-2">
+                            <h2 class="text-sm font-bold text-white flex items-center gap-2">
+                                <i data-lucide="git-compare" class="w-4 h-4 text-amber-400"></i>
+                                FPL ↔ NOTAM 자동 교차 대조
+                            </h2>
+                            <span class="text-[11px] font-mono px-2 py-0.5 rounded bg-slate-800 border border-slate-700 text-slate-300">계산됨</span>
+                        </div>
+
+                        <div class="grid grid-cols-2 sm:grid-cols-4 gap-2 text-center font-mono">
+                            <div class="bg-slate-950 border border-slate-800 rounded-lg p-2.5">
+                                <div class="text-[10px] text-slate-500">전체</div>
+                                <div class="text-lg font-bold text-slate-200">${xc.total}</div>
+                            </div>
+                            <div class="bg-slate-950 border border-slate-800 rounded-lg p-2.5">
+                                <div class="text-[10px] text-slate-500">비행 시간대 밖</div>
+                                <div class="text-lg font-bold text-slate-400">${xc.outside}</div>
+                            </div>
+                            <div class="bg-slate-950 border border-slate-800 rounded-lg p-2.5">
+                                <div class="text-[10px] text-slate-500">항로·공항 관련</div>
+                                <div class="text-lg font-bold text-amber-300">${xc.relevant}</div>
+                            </div>
+                            <div class="bg-slate-950 border border-rose-900/70 rounded-lg p-2.5">
+                                <div class="text-[10px] text-rose-400/80">확인 필요</div>
+                                <div class="text-lg font-bold text-rose-300">${xc.review}</div>
+                            </div>
+                        </div>
+
+                        <div class="text-[11px] font-mono text-slate-500 bg-slate-950/60 border border-slate-800 rounded-lg px-3 py-2 leading-relaxed">
+                            대조 기준 — 비행창: <span class="text-slate-300">${fmt(xc.window.start)} ~ ${fmt(xc.window.end)}</span>
+                            · 공항: <span class="text-slate-300">${xc.airports.join(', ') || '-'}</span>
+                            · 항로 지점/항로 수: <span class="text-slate-300">${xc.routeTokenCount}</span>
+                        </div>
+
+                        <p class="text-[11px] text-slate-400 leading-relaxed">
+                            “확인 필요”는 <strong class="text-slate-300">위반이 아니라</strong>,
+                            비행 시간대에 유효하면서 우리 항로나 공항을 직접 언급하고 제한 표현을 포함한 NOTAM이라는 뜻입니다.
+                            충족 여부는 기계가 판단하지 않으므로 반드시 직접 읽으십시오.
+                        </p>
+
+                        ${xc.rows.length ? `
+                        <div class="overflow-x-auto border border-slate-800 rounded-xl">
+                            <table class="w-full text-left text-xs font-mono min-w-[640px]">
+                                <thead class="bg-slate-950 text-slate-500">
+                                    <tr>
+                                        <th class="p-2.5">NOTAM</th>
+                                        <th class="p-2.5">공항</th>
+                                        <th class="p-2.5">항로 일치</th>
+                                        <th class="p-2.5">제한 표현</th>
+                                        <th class="p-2.5">유효기간</th>
+                                    </tr>
+                                </thead>
+                                <tbody class="divide-y divide-slate-800/70">
+                                    ${xc.rows.map((r) => `
+                                        <tr class="hover:bg-slate-800/30">
+                                            <td class="p-2.5 text-amber-300 whitespace-nowrap">${r.item.id}</td>
+                                            <td class="p-2.5 text-slate-300">${r.result.stationMatch ? `<span class="text-emerald-300">${r.item.station}</span>` : r.item.station}</td>
+                                            <td class="p-2.5 text-slate-300">${r.result.routeHits.slice(0, 4).join(', ') || '<span class="text-slate-600">-</span>'}</td>
+                                            <td class="p-2.5 text-rose-300">${r.result.limits.join(', ')}</td>
+                                            <td class="p-2.5 text-slate-500 whitespace-nowrap">${r.item.valid}</td>
+                                        </tr>`).join('')}
+                                </tbody>
+                            </table>
+                        </div>
+                        ${xc.review > xc.rows.length ? `<p class="text-[11px] text-slate-500">상위 ${xc.rows.length}건만 표시됩니다. 전체는 아래 NOTAM 목록에서 확인하십시오.</p>` : ''}
+                        ` : `<p class="text-xs text-slate-400">비행 시간대·항로·제한 표현이 모두 걹치는 NOTAM은 없습니다.</p>`}
+                    </div>`;
+                })()}
 
                 <!-- 3. Critical NOTAMs Section with Raw Text Box -->
                 <div class="space-y-4">
@@ -1624,6 +1910,7 @@ E) NAV ILS RWY 26R CAT II/III NA`
             const fullText = (typeof SAMPLE_AAR223_FULL_TEXT !== 'undefined') ? SAMPLE_AAR223_FULL_TEXT : "AAR223 KJFK RKSI";
             const briefing = buildExecutiveBriefing(fullText, "AAR223_KJFK_RKSI_A380_PACKAGE.pdf");
             allParsedNotams = parseAllRawNotamsWithShading(fullText);
+            lastDocText = fullText;
             userShadingMap = {};
             renderExecutiveReport(briefing);
             renderRawNotamWorkbench();
@@ -1633,6 +1920,7 @@ E) NAV ILS RWY 26R CAT II/III NA`
             const fullText = (typeof SAMPLE_AAR202_FULL_TEXT !== 'undefined') ? SAMPLE_AAR202_FULL_TEXT : "AAR202 RKSI KLAX";
             const briefing = buildExecutiveBriefing(fullText, "AAR202_RKSI_KLAX_A380_PACKAGE.pdf");
             allParsedNotams = parseAllRawNotamsWithShading(fullText);
+            lastDocText = fullText;
             userShadingMap = {};
             renderExecutiveReport(briefing);
             renderRawNotamWorkbench();
