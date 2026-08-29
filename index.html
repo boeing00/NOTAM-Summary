@@ -18,6 +18,10 @@
     <script src="https://unpkg.com/lucide@latest"></script>
     <!-- PDF.js CDN (Mozilla) -->
     <script src="https://cdnjs.cloudflare.com/ajax/libs/pdf.js/3.11.174/pdf.min.js"></script>
+    <!-- Pre-bundled Full Flight Datasets for Instant Preview -->
+    <script src="./aar223_text.js?v=2.2"></script>
+    <script src="./aar202_text.js?v=2.2"></script>
+
     <script>
         pdfjsLib.GlobalWorkerOptions.workerSrc = 'https://cdnjs.cloudflare.com/ajax/libs/pdf.js/3.11.174/pdf.worker.min.js';
         tailwind.config = {
@@ -45,7 +49,7 @@
             background-color: rgba(15, 23, 42, 0.6) !important;
         }
         .shaded-item:hover {
-            opacity: 0.85;
+            opacity: 0.9;
             filter: grayscale(0%);
         }
         @media print {
@@ -69,7 +73,7 @@
                 <div>
                     <div class="flex items-center gap-2">
                         <h1 class="text-base font-bold text-white tracking-wide">NOTAM & Route Compliance EFB</h1>
-                        <span class="text-[10px] px-2 py-0.5 rounded bg-emerald-500/10 border border-emerald-500/30 text-emerald-400 font-mono">Executive & Raw Shading</span>
+                        <span class="text-[10px] px-2 py-0.5 rounded bg-emerald-500/10 border border-emerald-500/30 text-emerald-400 font-mono">Executive & Full Archive</span>
                     </div>
                     <p id="headerSubtitle" class="text-xs text-slate-400 font-mono">비행계획서(PDF) 업로드 또는 샘플을 선택하세요</p>
                 </div>
@@ -107,10 +111,10 @@
                 <div class="pt-2 flex flex-wrap items-center justify-center gap-2" onclick="event.stopPropagation()">
                     <span class="text-xs text-slate-500">샘플 즉시 보기:</span>
                     <button onclick="loadSampleAAR223()" class="px-2.5 py-1 rounded bg-slate-800 hover:bg-slate-700 border border-slate-700 text-xs font-mono text-amber-300">
-                        AAR223 (JFK ➔ ICN)
+                        AAR223 (JFK ➔ ICN, 491건)
                     </button>
                     <button onclick="loadSampleAAR202()" class="px-2.5 py-1 rounded bg-slate-800 hover:bg-slate-700 border border-slate-700 text-xs font-mono text-amber-300">
-                        AAR202 (ICN ➔ LAX)
+                        AAR202 (ICN ➔ LAX, 335건)
                     </button>
                 </div>
             </div>
@@ -119,7 +123,7 @@
         <!-- Processing Indicator -->
         <div id="loadingIndicator" class="hidden bg-slate-900 border border-slate-800 rounded-xl p-8 text-center space-y-3 no-print">
             <div class="w-8 h-8 border-2 border-amber-400 border-t-transparent rounded-full animate-spin mx-auto"></div>
-            <p class="text-sm font-medium text-slate-200">PDF 전문 추출 및 원문 나열/스마트 음영 처리 중...</p>
+            <p class="text-sm font-medium text-slate-200">PDF 전문 추출 및 전수 원문 나열/스마트 음영 처리 중...</p>
             <p class="text-xs text-slate-500">클라이언트 브라우저에서 100% 안전하게 계산됩니다 (API 0회)</p>
         </div>
 
@@ -148,7 +152,7 @@
                                     </h2>
                                 </div>
                                 <p class="text-xs text-slate-400 mt-0.5">
-                                    모든 원문을 그대로 표시하며, 비운항시간·비운항항로·등화·표지 관련 NOTAM은 자동 음영 처리됩니다 (수동 전환 가능).
+                                    비행계획서 내 모든 원문을 그대로 표시하며, 비운항시간·비운항항로·등화·표지 관련 NOTAM은 자동 음영 처리됩니다.
                                 </p>
                             </div>
                         </div>
@@ -156,7 +160,7 @@
                         <!-- Shading Counters -->
                         <div class="flex items-center gap-2 font-mono text-xs shrink-0 flex-wrap">
                             <span class="px-3 py-1.5 rounded-lg bg-slate-950 border border-slate-800 text-slate-300">
-                                전체 <strong id="cntTotal" class="text-white">0</strong>건
+                                전체 <strong id="cntTotal" class="text-amber-400">0</strong>건
                             </span>
                             <span class="px-3 py-1.5 rounded-lg bg-emerald-950/60 border border-emerald-800/60 text-emerald-300">
                                 🟢 유효(필수) <strong id="cntActive" class="text-emerald-400">0</strong>건
@@ -189,7 +193,7 @@
                                     <span id="txtViewMode">모든 원문 표시 (음영 포함)</span>
                                 </button>
                                 <button onclick="batchShadeCategories()" class="px-3 py-1.5 rounded-lg border border-amber-500/40 bg-amber-500/10 hover:bg-amber-500/20 text-amber-300 transition">
-                                    ⚡ 등화·표지·시간외 자동음영 복원
+                                    ⚡ 자동음영 재계산
                                 </button>
                                 <button onclick="resetAllShadingOverrides()" class="px-2.5 py-1.5 rounded-lg border border-slate-800 bg-slate-900 hover:bg-slate-800 text-slate-400 hover:text-slate-200 transition">
                                     초기화
@@ -261,7 +265,7 @@
          * Determines if a NOTAM should be auto-shaded based on:
          * 1. Lighting (ALS, PAPI, RCLL, TWY LGT, etc.)
          * 2. Marking / Paint / Line WIP
-         * 3. Non-flight operating times (e.g. curfew hours outside flight arrival)
+         * 3. Non-flight operating times (curfew hours outside flight window)
          * 4. Non-flight routes (VFR only, low altitude, non-filed fixes)
          * 5. Trigger NOTAMs (AIP SUP)
          * 
@@ -289,7 +293,7 @@
             }
 
             // 2. Lighting (ALS, PAPI, RCLL, TWY LGT, etc.)
-            if (/\b(ALS|ALSF|MALSR|MALSF|SALS|SSALS|PAPI|VASI|RCLL|REDL|RTIL|TDZL|APPROACH LIGHT|TWY.*LGT|APRON.*LGT|OBST.*LGT|FLG LGT|STOP BAR.*TRIAL|ENTRY LGT.*U\/S)\b/.test(upper)) {
+            if (/\b(ALS|ALSF|MALSR|MALSF|SALS|SSALS|PAPI|VASI|RCLL|REDL|RTIL|TDZL|APPROACH LIGHT|TWY.*LGT|APRON.*LGT|OBST.*LGT|FLG LGT|STOP BAR.*TRIAL|ENTRY LGT.*U\/S|LGT U\/S)\b/.test(upper)) {
                 return { isShaded: true, reasonCategory: "LIGHTING", reasonText: "💡 등화(Lighting) 정비/시범운영" };
             }
 
@@ -312,39 +316,55 @@
         }
 
         /**
-         * Parses all raw NOTAMs from fullText and assigns smart shading properties.
+         * Robust Index-Slicing NOTAM Parser: Captures 100% of all NOTAM blocks from fullText.
          */
         function parseAllRawNotamsWithShading(fullText) {
             const list = [];
             const seen = new Set();
-            const p = /(?:(?:\d+\.\s*)?(\d{2}[A-Z]{3}\d{2}\s+\d{2}:\d{2})\s*-\s*([^\n\r]+?)\s+([A-Z]{4})\s+([A-Z0-9/]+))(?:\r?\n)([\s\S]*?)(?=(?:\r?\n(?:\d+\.\s*)?\d{2}[A-Z]{3}\d{2}\s+\d{2}:\d{2}\s*-|\r?\n\[[A-Z]+\]|\r?\n◼|\Z))/g;
+            
+            // Pattern to find every NOTAM header line
+            const headerRegex = /(?:(?:\d+\.\s*)?(\d{2}[A-Z]{3}\d{2}\s+\d{2}:\d{2})\s*-\s*([^\n\r]+?)\s+([A-Z]{4})\s+([A-Z0-9/]+))/g;
+            const matches = [];
             let m;
-            let idx = 1;
+            while ((m = headerRegex.exec(fullText)) !== null) {
+                matches.push({
+                    start: m.index,
+                    validStart: m[1].trim(),
+                    validEnd: m[2].trim(),
+                    station: m[3].trim(),
+                    num: m[4].trim()
+                });
+            }
 
-            while ((m = p.exec(fullText)) !== null) {
-                const start = m[1].trim();
-                const end = m[2].trim();
-                const stn = m[3].trim();
-                const num = m[4].trim();
-                const body = m[5].trim();
-                const id = `${stn} ${num}`;
+            let idx = 1;
+            for (let i = 0; i < matches.length; i++) {
+                const cur = matches[i];
+                const nextStart = (i + 1 < matches.length) ? matches[i + 1].start : fullText.length;
+                let rawBlock = fullText.slice(cur.start, nextStart).trim();
+
+                const sectionIdx = rawBlock.search(/\n\[[A-Z]+\]/);
+                if (sectionIdx !== -1) {
+                    rawBlock = rawBlock.slice(0, sectionIdx).trim();
+                }
+
+                const id = `${cur.station} ${cur.num}`;
                 if (seen.has(id)) continue;
                 seen.add(id);
 
-                const rawBlock = `${start} - ${end} ${stn} ${num}\n${body}`;
-                const auto = evaluateAutoShading(rawBlock, stn, fullText);
+                const auto = evaluateAutoShading(rawBlock, cur.station, fullText);
 
                 list.push({
                     index: idx++,
                     id: id,
-                    station: stn,
-                    valid: `${start} ~ ${end}`,
+                    station: cur.station,
+                    valid: `${cur.validStart} ~ ${cur.validEnd}`,
                     raw: rawBlock,
                     autoShaded: auto.isShaded,
                     reasonCategory: auto.reasonCategory,
                     reasonText: auto.reasonText
                 });
             }
+
             return list;
         }
 
@@ -666,7 +686,7 @@ E) TEMPORARY PROHIBITED AREA ESTABLISHED RADIUS 2NM CENTERED ON 373523N1265832E.
                 
                 // Parse full raw list
                 allParsedNotams = parseAllRawNotamsWithShading(fullText);
-                userShadingMap = {}; // reset overrides
+                userShadingMap = {};
 
                 renderExecutiveReport(briefing);
                 renderRawNotamWorkbench();
@@ -959,10 +979,13 @@ E) TEMPORARY PROHIBITED AREA ESTABLISHED RADIUS 2NM CENTERED ON 373523N1265832E.
             // Update Station tabs
             const stations = Array.from(new Set(allParsedNotams.map(x => x.station))).sort();
             document.getElementById('rawStationTabs').innerHTML = `
-                <button onclick="filterByStation('ALL')" class="stn-pill ${currentStationTab === 'ALL' ? 'active bg-amber-500/15 border-amber-500/40 text-amber-300' : 'bg-slate-900 border-slate-800 text-slate-400'} px-2.5 py-1 rounded text-xs font-mono border transition" data-stn="ALL">전체 공항/FIR</button>
-                ${stations.map(stn => `
-                    <button onclick="filterByStation('${stn}')" class="stn-pill ${currentStationTab === stn ? 'active bg-amber-500/15 border-amber-500/40 text-amber-300' : 'bg-slate-900 border-slate-800 text-slate-400'} px-2.5 py-1 rounded text-xs font-mono border transition" data-stn="${stn}">${stn}</button>
-                `).join('')}
+                <button onclick="filterByStation('ALL')" class="stn-pill ${currentStationTab === 'ALL' ? 'active bg-amber-500/15 border-amber-500/40 text-amber-300' : 'bg-slate-900 border-slate-800 text-slate-400'} px-2.5 py-1 rounded text-xs font-mono border transition" data-stn="ALL">전체 공항/FIR (${allParsedNotams.length})</button>
+                ${stations.map(stn => {
+                    const cnt = allParsedNotams.filter(x => x.station === stn).length;
+                    return `
+                        <button onclick="filterByStation('${stn}')" class="stn-pill ${currentStationTab === stn ? 'active bg-amber-500/15 border-amber-500/40 text-amber-300' : 'bg-slate-900 border-slate-800 text-slate-400'} px-2.5 py-1 rounded text-xs font-mono border transition" data-stn="${stn}">${stn} (${cnt})</button>
+                    `;
+                }).join('')}
             `;
 
             renderRawNotamList();
@@ -1142,97 +1165,18 @@ E) TEMPORARY PROHIBITED AREA ESTABLISHED RADIUS 2NM CENTERED ON 373523N1265832E.
         }
 
         function loadSampleAAR223() {
-            const sampleText = `
-[DEP]KJFK/ JFK/ John F Kennedy International Airport, New York, US
-29AUG26 03:00 - 29AUG26 10:00 KJFK A7259/26
-E) RWY 04R/22L CLSD
-COMMENT) CODE F A/C USING RWY
-29AUG26 03:00 - 29AUG26 10:00 KJFK A7258/26
-E) RWY 04L/22R CLSD
-COMMENT) CODE F A/C USING RWY
-28AUG26 17:15 - 30OCT26 23:59 KJFK A7257/26
-E) TWY K, KE, KD RWY ENTRANCE LGT FOR RWY 31L U/S
-28AUG26 10:33 - 15JAN27 23:00 KJFK A7241/26
-E) TWY M LGT BTN TWY A AND TWY B U/S
-28AUG26 04:02 - 04SEP26 23:00 KJFK A7239/26
-E) TWY M BTN RWY 13R/31L AND TWY B CLSD
-25AUG26 21:00 - 01SEP26 16:14 KJFK A7174/26
-E) SID JOHN F KENNEDY INTL, NEW YORK, NY. KENNEDY FIVE DEPARTURE...
-DEPARTURE PROCEDURE NA EXCEPT FOR ACFT EQUIPPED WITH SUITABLE RNAV SYSTEM WITH GPS, JFK VOR/DME OUT OF SERVICE.
-28AUG26 15:10 - 25SEP26 15:10 KJFK A7252/26
-E) SID JOHN F KENNEDY INTL, NEW YORK, NY. KENNEDY FIVE DEPARTURE...
-TAKEOFF RUNWAYS 31L/R: BREEZY POINT CLIMB AND CANARSIE CLIMB NA EXCEPT FOR ACFT EQUIPPED WITH SUITABLE RNAV SYSTEM WITH GPS, CRI VOR/DME OUT OF SERVICE.
-27JUL26 21:10 - 08MAR27 21:10 KJFK A6516/26
-E) ODP JOHN F KENNEDY INTL, NEW YORK, NY. TAKEOFF MINIMUMS AND (OBSTACLE) DEPARTURE PROCEDURES AMDT 9A... ADD TAKEOFF OBSTACLE NOTE:
-RWY 31R, TEMPORARY CRANE 4276FT FROM DER, 1540FT LEFT OF CENTERLINE, 125FT AGL/138FT MSL (2024-AEA-5111-NRA).
-27JUL26 20:45 - 08MAR27 20:45 KJFK A6514/26
-E) IAP JOHN F KENNEDY INTL, NEW YORK, NY. RNAV (GPS) RWY 31L, AMDT 2C... LPV DA 297/HAT 284 ALL CATS. VISIBILITY ALL CATS RVR 4500. EXCEPT WHEN ADVISED BY ATCT THAT THIS CRANE IS DOWN. TEMPORARY CRANE 256FT MSL 4985FT NORTHWEST OF RWY 31L (2023-AEA-5122-NRA).
-
-[DEST]RKSI/ ICN/ Seoul Incheon International Airport, Seoul, KR
-31JUL26 04:34 - 30SEP26 16:00 RKSI A1073/26
-E) TXL R23, R24 AVBL FOR ACFT UP TO ICAO CODE E WHEN TAXIING TO STAND 208R, 290R
-10JUN26 16:00 - 24DEC26 00:00 RKSI Z0286/26
-E) TRIGGER NOTAM - AIRAC AIP SUP 41/26 WEF 1600 UTC 10 JUN 2026 TIL 0000 UTC 24 DEC 2026 - ACFT STAND NR 711 WILL BE CLOSED AS FOLLOWS DUE TO CONSTRUCTION FOR TEMPORARY FACILITY.
-30MAY24 01:15 - UFN RKSI Z0511/24
-E) CAUTIONARY INFO FOR ACFT OPERATING IN INCHEON FIR : PILOTS HAVE REPORTED THAT GPS SIGNALS ARE UNRELIABLE OR LOST INTERMITTENTLY IN INCHEON FIR(AROUND INCHEON AND SEOUL AREA).
-
-[ALTN]RKSS/ GMP/ Seoul Gimpo International Airport, Seoul, KR
-29JUN26 14:00 - 31AUG26 20:00 RKSS A0908/26
-E) RWY 14L/32R CLSD DUE TO WIP
-17AUG26 00:00 - 31AUG26 14:59 RKSS A1104/26
-E) STOP BAR LIGHT AT TWY B1,C1,D1,E1,G1(INCLUDING ILS HOLD POSITION), TWY W1,W2 FOR RWY 14R/32L WILL BE OPR TRIAL BASIS.
-
-[FIR] PAZA/ Anchorage Continental, US
-17AUG26 00:43 - 17AUG27 00:30 PAZA A2428/26
-E) VOLCANIC ACTIVITY ADVISORY FOR KLYUCHEVSKOY VOLCANO / 560300N1603900E / KAMCHATKAN PENINSULA, RUSSIA. KLYUCHEVSKOY VOLCANO HAS BEEN IN AN ACTIVE STATE. HAZARDOUS EMISSIONS OF VOLCANIC ASH HAVE INTERMITTENTLY COMPLICATED AIR TRAVEL IN THE AREA. COLOR CODE ORANGE. F) SFC G) FL250
-19MAR26 15:00 - 31OCT26 06:00 PAZA A0176/26
-E) YUKON 1-5, DELTA AND FOX ATC ASSIGNED AIRSPACE WILL NORMALLY BE ACT MON-FRI BTN THE HOURS OF 1500-0600. FLTS ENTERING ANCHORAGE FIR N OF 620000N1410000W MUST BE ESTABLISHED EITHER: (A) ON OR N OF GOATS DCT BTT (B) ON OR S OF ORT J124 GKN DTOUR
-21AUG26 23:21 - 30NOV26 23:59 PAZA A2472/26
-E) USER PREFERRED ROUTE FLIGHT PLANNING GUIDELINES 2. USER PREFERRED ROUTE ENTERY/EXIT BTN CZEG, CZVR OR KZAK FIR: A. CZEG FIR: BTN TAYTA AND DEEJA MUST FLT PLAN OVER ONE OF THE FOLLOWING FIXES: GOATS... 3. WB USER PREFERRED ROUTE TO RJJJ FIR: A. JOIN R220 OVER OR E OF WAYPOINT NIKLL
-
-[FIR] RJJJ/ Fukuoka, JP
-28AUG26 22:00 - 29AUG26 22:00 RJJJ Q2053/26
-E) CDR ARE ESTABLISHED AS FLW, RTE PERIOD MNM APPLICABLE ALT 1) L512 2608291200/2608292200 MEA
-
-[ERA]CYUL/ YUL/ Montreal Pierre Elliott Trudeau Int Airport, Montreal, CA
-10JUL26 17:36 - 16SEP26 16:00 CYUL E4479/26
-E) AD NOT AVBL TO ACFT WITH WINGSPAN GREATER THAN 213FT
-            `;
-            const briefing = buildExecutiveBriefing(sampleText, "AAR223_KJFK_RKSI_A380_PACKAGE.pdf");
-            allParsedNotams = parseAllRawNotamsWithShading(sampleText);
+            const fullText = (typeof SAMPLE_AAR223_FULL_TEXT !== 'undefined') ? SAMPLE_AAR223_FULL_TEXT : "AAR223 KJFK RKSI";
+            const briefing = buildExecutiveBriefing(fullText, "AAR223_KJFK_RKSI_A380_PACKAGE.pdf");
+            allParsedNotams = parseAllRawNotamsWithShading(fullText);
             userShadingMap = {};
             renderExecutiveReport(briefing);
             renderRawNotamWorkbench();
         }
 
         function loadSampleAAR202() {
-            const sampleText = `
-[DEP]RKSI/ ICN/ Seoul Incheon International Airport, Seoul, KR
-10AUG26 00:00 - 31AUG26 23:59 RKSI A1024/26
-E) RWY 15L/33R CLSD DUE TO WIP
-10AUG26 00:00 - 15SEP26 23:59 RKSI A1025/26
-E) TWY M1, M2 BTN RWY 15L AND TWY R CLSD DUE TO PAVEMENT WORK
-10AUG26 01:00 - 30SEP26 12:00 RKSI A1028/26
-E) ILS RWY 15R GP U/S DUE TO SCHEDULED MAINT
-
-[DEST]KLAX/ LAX/ Los Angeles International Airport, Los Angeles, US
-29AUG26 07:30 - 29AUG26 13:30 KLAX A4733/26
-E) RWY 07L/25R CLSD
-06AUG26 07:30 - 01SEP26 13:30 KLAX A4372/26
-E) TWY B BTN TWY B3 AND TWY B1 CLSD TO ACFT WINGSPAN MORE THAN 118FT
-12JUL26 08:00 - 15OCT26 23:59 KLAX A4522/26
-E) RWY 24R PAPI U/S
-
-[ALTN]KONT/ ONT/ Ontario International Airport, Los Angeles, US
-27AUG26 17:06 - 09SEP26 23:59 KONT A1769/26
-E) RWY 26L PAPI U/S
-25JUN26 07:41 - 30DEC26 23:59 KONT A1388/26
-E) RWY 26R ALS U/S
-25JUN26 07:34 - 30DEC26 23:59 KONT A1387/26
-E) NAV ILS RWY 26R CAT II/III NA
-            `;
-            const briefing = buildExecutiveBriefing(sampleText, "AAR202_RKSI_KLAX_A380_PACKAGE.pdf");
-            allParsedNotams = parseAllRawNotamsWithShading(sampleText);
+            const fullText = (typeof SAMPLE_AAR202_FULL_TEXT !== 'undefined') ? SAMPLE_AAR202_FULL_TEXT : "AAR202 RKSI KLAX";
+            const briefing = buildExecutiveBriefing(fullText, "AAR202_RKSI_KLAX_A380_PACKAGE.pdf");
+            allParsedNotams = parseAllRawNotamsWithShading(fullText);
             userShadingMap = {};
             renderExecutiveReport(briefing);
             renderRawNotamWorkbench();
@@ -1243,8 +1187,10 @@ E) NAV ILS RWY 26R CAT II/III NA
             navigator.serviceWorker.register('./sw.js').catch(err => console.log('SW Reg:', err));
         }
 
-        // Load AAR223 by default on initial view
-        loadSampleAAR223();
+        // Load full 491-NOTAM AAR223 by default on initial view
+        window.addEventListener('DOMContentLoaded', () => {
+            loadSampleAAR223();
+        });
     </script>
 </body>
 </html>

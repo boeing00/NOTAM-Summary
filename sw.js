@@ -1,8 +1,9 @@
-const CACHE_NAME = 'notam-efb-v2';
+const CACHE_NAME = 'notam-efb-v3';
 const ASSETS = [
   './',
   './index.html',
-  './notam_engine.js?v=2.1',
+  './aar223_text.js?v=2.2',
+  './aar202_text.js?v=2.2',
   './manifest.json',
   'https://cdn.tailwindcss.com',
   'https://unpkg.com/lucide@latest',
@@ -30,7 +31,6 @@ self.addEventListener('activate', (e) => {
 });
 
 self.addEventListener('fetch', (e) => {
-  // Network first, fallback to cache
   e.respondWith(
     fetch(e.request)
       .then((res) => {
