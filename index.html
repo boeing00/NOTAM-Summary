@@ -709,6 +709,58 @@
         ];
 
         /**
+         * The crossed FIRs in the order they are entered, so a card can show
+         * "came from X, leaving to Y" - which is exactly what a clause phrased
+         * "FROM WINNIPEG FIR TO VANCOUVER FIR" turns on.
+         */
+        function extractFirSequence(fullText) {
+            const seq = [];
+            const m = String(fullText).toUpperCase()
+                .match(/\bEET\/([\s\S]*?)(?=\s+[A-Z]{2,}\/|\)|$)/);
+            if (!m) return seq;
+            const re = /\b([A-Z]{4})(\d{4})\b/g;
+            let g;
+            while ((g = re.exec(m[1])) !== null) {
+                if (g[1] === "ADIZ") continue;
+                if (seq.length && seq[seq.length - 1].fir === g[1]) continue;  // re-entry
+                seq.push({ fir: g[1], eet: g[2] });
+            }
+            return seq;
+        }
+
+        /** Filed cruise levels from field 15, as a min/max band. */
+        function extractLevelBand(route) {
+            // Levels sit inside a speed/level group - N0493F310, M084F340 - so
+            // there is no word boundary before the F. F\d{3} matched nothing.
+            const ls = (String(route || "").toUpperCase().match(/F(\d{3})(?![0-9])/g) || [])
+                .map((x) => parseInt(x.slice(1), 10));
+            if (!ls.length) return null;
+            return { min: Math.min.apply(null, ls), max: Math.max.apply(null, ls) };
+        }
+
+        // 5-letter tokens in a NOTAM that are probably reporting points rather
+        // than English. Crude on purpose - it is shown as evidence, never used
+        // to decide anything.
+        const FIX_STOPWORDS = new Set(["ROUTE","ROUTES","SHALL","NORTH","SOUTH","TRACK","TRACKS",
+            "ABOVE","BELOW","UNTIL","VALID","OTHER","THESE","WHICH","FILED","ADDED","AMEND",
+            "UNDER","MAINT","CLOSE","TOWER","RADAR","LIGHT","APRON","WORKS","DAILY","HOURS",
+            "TOTAL","LOCAL","FINAL","ENTRY","WHOLE","POINT","LIMIT","AREAS","ZONES","LEVEL",
+            "NIGHT","EXCPT","REFER","ISSUE","NOTAM","START","STOPS","AVBLE","CHECK","EFFCT",
+            "SFCFL","GROUP","PHASE","STAGE","ORDER","RULES","INFOR","ADVSY","OPERS"]);
+
+        /** Five-letter fixes a NOTAM names, split into ours and not-ours. */
+        function namedFixes(body, ourFixes) {
+            const mine = [], theirs = [];
+            const seen = new Set();
+            (body.match(/\b[A-Z]{5}\b/g) || []).forEach((tok) => {
+                if (seen.has(tok) || FIX_STOPWORDS.has(tok)) return;
+                seen.add(tok);
+                (ourFixes.has(tok) ? mine : theirs).push(tok);
+            });
+            return { mine, theirs: theirs.slice(0, 12) };
+        }
+
+        /**
          * Paints the matched bits inside the raw telex: route points amber,
          * restriction wording rose. One pass over a combined pattern so an
          * inserted span can never be re-scanned, longest phrase first so
@@ -818,6 +870,19 @@
                 Array.from(routeLines).every((i) => !limitLines.has(i));
 
             const firMatch = ctx.firs.has(item.station);
+
+            // Where this FIR sits in our crossing order, and what the NOTAM names.
+            let firContext = null;
+            if (firMatch && ctx.firSeq.length) {
+                const i = ctx.firSeq.findIndex((x) => x.fir === item.station);
+                if (i >= 0) {
+                    firContext = {
+                        prev: i > 0 ? ctx.firSeq[i - 1].fir : null,
+                        next: i + 1 < ctx.firSeq.length ? ctx.firSeq[i + 1].fir : null
+                    };
+                }
+            }
+            const fixes = namedFixes(body, ctx.route.fixes);
             const inWindow = timeState !== "OUTSIDE";
             // En route = the airspace we fly through, or a NOTAM that names a
             // point we filed. Airport NOTAMs are the other bucket.
@@ -837,6 +902,9 @@
                 navaidHits: weak,
                 limits,
                 limitWords,
+                firContext,
+                namedOurs: fixes.mine,
+                namedTheirs: fixes.theirs,
                 routeQuotes,
                 limitQuotes,
                 separated,
@@ -853,6 +921,8 @@
                 window: computeFlightWindow(fullText, fpl),
                 airports: extractFlightAirports(fullText, fpl),
                 firs: extractCrossedFirs(fullText),
+                firSeq: extractFirSequence(fullText),
+                levels: extractLevelBand(fpl && fpl.route ? fpl.route : routeText),
                 route: extractRouteTokens(fpl && fpl.route ? fpl.route : routeText)
             };
 
@@ -878,6 +948,8 @@
                 airports: Array.from(ctx.airports),
                 routeTokenCount: ctx.route.fixes.size + ctx.route.airways.size + ctx.route.points.size,
                 firs: Array.from(ctx.firs),
+                firSeq: ctx.firSeq,
+                levels: ctx.levels,
                 total: notams.length,
                 outside,
                 airportCount,
@@ -1512,7 +1584,21 @@ E) NAV ILS RWY 26R CAT II/III NA`
                                     : `\uc720\ud6a8\uae30\uac04 <span class="text-slate-300">${r.item.valid}</span> \u2014 \uc2dc\uac04 \ud310\ub2e8 \ubd88\uac00`);
 
                                 if (r.result.firMatch) {
-                                    why.push(`\ud1b5\uacfc FIR <span class="text-slate-300">${r.item.station}</span>\uc5d0\uc11c \ubc1c\ud589 (18\ud56d EET/)`);
+                                    // Clauses like "FROM WINNIPEG FIR TO VANCOUVER FIR"
+                                    // hinge on where we entered this FIR and where we
+                                    // leave it. Both are in field 18 EET/, so say them.
+                                    const fc = r.result.firContext;
+                                    const chain = fc
+                                        ? `${fc.prev ? fc.prev + ' \u2192 ' : '\ucd9c\ubc1c \u2192 '}<span class="text-amber-300">${r.item.station}</span>${fc.next ? ' \u2192 ' + fc.next : ' \u2192 \ub3c4\ucc29'}`
+                                        : `<span class="text-amber-300">${r.item.station}</span>`;
+                                    why.push(`\ud1b5\uacfc FIR \ubc1c\ud589 (18\ud56d EET/) \u2014 ${chain}`
+                                        + (xc.levels
+                                            ? `<div class="mt-1 font-mono text-[11px] text-slate-400">\uacc4\ud68d \uace0\ub3c4 \ubc94\uc704 FL${xc.levels.min} ~ FL${xc.levels.max} (15\ud56d)</div>`
+                                            : ''));
+                                }
+                                if (r.result.namedTheirs.length) {
+                                    why.push(`<span class="text-slate-500">\uc774 NOTAM\uc774 \uc9c0\uc815\ud55c \uc9c0\uc810 \uc911 \ub0b4 \ud56d\ub85c\uc5d0 \uc5c6\ub294 \uac83: ${r.result.namedTheirs.join(', ')}</span>`
+                                        + `<div class="mt-1 text-[11px] text-slate-500">\uc9c0\uc810\uc774 \uc804\ubd80 \ub0b4 \ud56d\ub85c \ubc16\uc774\ub77c\uba74 \ub2e4\ub978 \ud68c\ub791\uc744 \ub300\uc0c1\uc73c\ub85c \ud55c \uc870\ud56d\uc77c \uc218 \uc788\uc2b5\ub2c8\ub2e4 (\ucd94\uc815 \u00b7 \ud310\uc815 \uadfc\uac70 \uc544\ub2d8)</div>`);
                                 }
                                 if (r.result.routeHits.length) {
                                     why.push(`15\ud56d \ud56d\ub85c\uc758 <span class="text-amber-300">${r.result.routeHits.join(', ')}</span> \uc5b8\uae09`
