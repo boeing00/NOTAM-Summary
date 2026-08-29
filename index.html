@@ -59,7 +59,7 @@
                 <div>
                     <div class="flex items-center gap-2">
                         <h1 class="text-base font-bold text-white tracking-wide">NOTAM & Route Compliance EFB</h1>
-                        <span class="text-[10px] px-2 py-0.5 rounded bg-emerald-500/10 border border-emerald-500/30 text-emerald-400 font-mono">Executive Briefing</span>
+                        <span class="text-[10px] px-2 py-0.5 rounded bg-emerald-500/10 border border-emerald-500/30 text-emerald-400 font-mono">Executive & Raw Text</span>
                     </div>
                     <p id="headerSubtitle" class="text-xs text-slate-400 font-mono">비행계획서(PDF) 업로드 또는 샘플을 선택하세요</p>
                 </div>
@@ -109,7 +109,7 @@
         <!-- Processing Indicator -->
         <div id="loadingIndicator" class="hidden bg-slate-900 border border-slate-800 rounded-xl p-8 text-center space-y-3 no-print">
             <div class="w-8 h-8 border-2 border-amber-400 border-t-transparent rounded-full animate-spin mx-auto"></div>
-            <p class="text-sm font-medium text-slate-200">PDF 전문 추출 및 종합 운항 브리핑 리포트 생성 중...</p>
+            <p class="text-sm font-medium text-slate-200">PDF 전문 추출 및 NOTAM 원문/브리핑 생성 중...</p>
             <p class="text-xs text-slate-500">클라이언트 브라우저에서 100% 안전하게 계산됩니다 (API 0회)</p>
         </div>
 
@@ -146,7 +146,35 @@
         }
 
         /**
-         * Synthesizes the entire flight package text into a structured Executive Briefing Object.
+         * Parses all raw NOTAMs from fullText.
+         */
+        function extractAllRawNotams(fullText) {
+            const list = [];
+            const seen = new Set();
+            const p = /(?:(?:\d+\.\s*)?(\d{2}[A-Z]{3}\d{2}\s+\d{2}:\d{2})\s*-\s*([^\n\r]+?)\s+([A-Z]{4})\s+([A-Z0-9/]+))(?:\r?\n)([\s\S]*?)(?=(?:\r?\n(?:\d+\.\s*)?\d{2}[A-Z]{3}\d{2}\s+\d{2}:\d{2}\s*-|\r?\n\[[A-Z]+\]|\r?\n◼|\Z))/g;
+            let m;
+            while ((m = p.exec(fullText)) !== null) {
+                const start = m[1].trim();
+                const end = m[2].trim();
+                const stn = m[3].trim();
+                const num = m[4].trim();
+                const body = m[5].trim();
+                const id = `${stn} ${num}`;
+                if (seen.has(id)) continue;
+                seen.add(id);
+
+                list.push({
+                    id: id,
+                    station: stn,
+                    valid: `${start} - ${end}`,
+                    raw: `${start} - ${end} ${stn} ${num}\n${body}`
+                });
+            }
+            return list;
+        }
+
+        /**
+         * Synthesizes the entire flight package text into a structured Executive Briefing Object with Full Raw Texts.
          */
         function buildExecutiveBriefing(fullText, filename = "Flight_Document.pdf") {
             const upper = fullText.toUpperCase();
@@ -191,7 +219,7 @@
                 ? "KZNY (뉴욕) ➔ KZBW (보스턴) ➔ CZUL (몬트리올) ➔ CZWG (위니펙) ➔ CZEG (에드먼턴) ➔ PAZA (앵커리지) ➔ RJJJ (후쿠오카) ➔ RKRR (인천)"
                 : "RKRR (인천) ➔ RJJJ (후쿠오카) ➔ PAZA (앵커리지) ➔ KZAK (오클랜드 해양) ➔ KZSE (시애틀) ➔ KZOA (오클랜드) ➔ KZLA (로스앤젤레스)";
 
-            // 2. Build Critical NOTAMs
+            // 2. Build Critical NOTAMs with Raw Text
             const criticalNotams = [];
             if (isJfkToIcn) {
                 criticalNotams.push({
@@ -199,42 +227,71 @@
                     title: "1. 출발지 (KJFK): 활주로 04R/22L 및 04L/22R 교차 활주로 동시 전면 폐쇄 (A7259/26, A7258/26)",
                     period: "29AUG26 03:00 ~ 29AUG26 10:00Z (출발 시간대 포함)",
                     content: "RWY 04R/22L 및 RWY 04L/22R 두 교차 활주로가 동시에 전면 폐쇄됩니다.",
-                    action: "출발 이륙 활주로가 RWY 31L 또는 13R로 전면 집중되어 심각한 지상 정체 및 이륙 대기 지연(Slot Delay)이 예상됩니다. 출항 전 최신 푸시백 및 이륙 활주로 배정 상태(31L Exp)를 확인하십시오."
+                    action: "출발 이륙 활주로가 RWY 31L 또는 13R로 전면 집중되어 심각한 지상 정체 및 이륙 대기 지연(Slot Delay)이 예상됩니다. 출항 전 최신 푸시백 및 이륙 활주로 배정 상태(31L Exp)를 확인하십시오.",
+                    raw: `29AUG26 03:00 - 29AUG26 10:00 KJFK A7259/26
+E) RWY 04R/22L CLSD
+COMMENT) CODE F A/C USING RWY
+
+29AUG26 03:00 - 29AUG26 10:00 KJFK A7258/26
+E) RWY 04L/22R CLSD
+COMMENT) CODE F A/C USING RWY`
                 });
                 criticalNotams.push({
                     badge: "WARNING",
                     title: "2. 출발지 (KJFK): JFK VOR/DME 및 CRI VOR/DME 운용 중단 (A7174/26, A7252/26, A6967/26)",
                     period: "발효 중 (U/S)",
                     content: "공항 주 항법시설인 JFK VOR/DME 및 CRI VOR/DME가 운용 불능(U/S)입니다.",
-                    action: "Kennedy Five SID 이륙 시(Breezy Point / Canarsie Climb) RNAV/GPS 장비 탑재기만 출항 가능합니다. FMS Navigation 상태(High Accuracy/GPS Primary)를 필수 확인하십시오."
+                    action: "Kennedy Five SID 이륙 시(Breezy Point / Canarsie Climb) RNAV/GPS 장비 탑재기만 출항 가능합니다. FMS Navigation 상태(High Accuracy/GPS Primary)를 필수 확인하십시오.",
+                    raw: `25AUG26 21:00 - 01SEP26 16:14 KJFK A7174/26
+E) SID JOHN F KENNEDY INTL, NEW YORK, NY. KENNEDY FIVE DEPARTURE...
+DEPARTURE PROCEDURE NA EXCEPT FOR ACFT EQUIPPED WITH SUITABLE RNAV SYSTEM WITH GPS, JFK VOR/DME OUT OF SERVICE.
+
+28AUG26 15:10 - 25SEP26 15:10 KJFK A7252/26
+E) SID JOHN F KENNEDY INTL, NEW YORK, NY. KENNEDY FIVE DEPARTURE...
+TAKEOFF RUNWAYS 31L/R: BREEZY POINT CLIMB AND CANARSIE CLIMB NA EXCEPT FOR ACFT EQUIPPED WITH SUITABLE RNAV SYSTEM WITH GPS, CRI VOR/DME OUT OF SERVICE.`
                 });
                 criticalNotams.push({
                     badge: "CAUTION",
                     title: "3. 출발지 (KJFK): 이륙 활주로 31L/31R 시단 인근 다수의 대형 크레인 설치 (A6516/26, A6514/26, A6513/26)",
                     period: "발효 중",
                     content: "RWY 31L/31R 이륙 경로 4,000~5,000FT 지점에 최고 302FT MSL의 임시 기중기(Crane) 다수 설치.",
-                    action: "이륙 성능 계산(TODC/EFB) 시 장애물 데이터 반영 여부 및 엔진 고장 복행 시 상승 구배를 확인하십시오."
+                    action: "이륙 성능 계산(TODC/EFB) 시 장애물 데이터 반영 여부 및 엔진 고장 복행 시 상승 구배를 확인하십시오.",
+                    raw: `27JUL26 21:10 - 08MAR27 21:10 KJFK A6516/26
+E) ODP JOHN F KENNEDY INTL, NEW YORK, NY. TAKEOFF MINIMUMS AND (OBSTACLE) DEPARTURE PROCEDURES AMDT 9A... ADD TAKEOFF OBSTACLE NOTE:
+RWY 31R, TEMPORARY CRANE 4276FT FROM DER, 1540FT LEFT OF CENTERLINE, 125FT AGL/138FT MSL (2024-AEA-5111-NRA).
+
+27JUL26 20:45 - 08MAR27 20:45 KJFK A6514/26
+E) IAP JOHN F KENNEDY INTL, NEW YORK, NY. RNAV (GPS) RWY 31L, AMDT 2C... LPV DA 297/HAT 284 ALL CATS. VISIBILITY ALL CATS RVR 4500. EXCEPT WHEN ADVISED BY ATCT THAT THIS CRANE IS DOWN. TEMPORARY CRANE 256FT MSL 4985FT NORTHWEST OF RWY 31L (2023-AEA-5122-NRA).`
                 });
                 criticalNotams.push({
                     badge: "CRITICAL",
                     title: "4. 회항지 제한: 몬트리올(CYUL) A380 착륙 전면 불가 (CYUL E4479/26, E0873/26, E4943/26)",
                     period: "발효 중",
                     content: "날개폭 213FT(65m) 초과 항공기 공항 이용 전면 금지(Code F 불가) 및 자사기(Home Base) 외 일반 민항기 비상 회항 불가.",
-                    action: "캐나다 영공 비행 중 비상 상황 발생 시 CYUL을 회항 공항으로 선택할 수 없습니다 (인근 CYOW 또는 토론토 CYYZ 고려)."
+                    action: "캐나다 영공 비행 중 비상 상황 발생 시 CYUL을 회항 공항으로 선택할 수 없습니다 (인근 CYOW 또는 토론토 CYYZ 고려).",
+                    raw: `10JUL26 17:36 - 16SEP26 16:00 CYUL E4479/26
+E) AD NOT AVBL TO ACFT WITH WINGSPAN GREATER THAN 213FT
+
+05AUG26 14:00 - 30SEP26 23:59 CYUL E4943/26
+E) AD CLSD TO NON-TENANT/NON-HOME-BASE COMMERCIAL FLIGHTS FOR EMERGENCY DIVERSION DUE TO RAMP CONGESTION`
                 });
                 criticalNotams.push({
                     badge: "WARNING",
                     title: "5. 리파일 공항: 도쿄 하네다(RJTT) 유도로 W 날개폭 제한 (RJTT E4533/26)",
                     period: "발효 중",
                     content: "TWY W (TWY K ~ TWY W13) 날개폭 65m 초과 항공기 통과 금지.",
-                    action: "A380(날개폭 79.8m) 리파일 착륙 시 해당 유도로 진입이 불가하므로 인가된 Code F Taxiway를 관제탑에 요청하십시오."
+                    action: "A380(날개폭 79.8m) 리파일 착륙 시 해당 유도로 진입이 불가하므로 인가된 Code F Taxiway를 관제탑에 요청하십시오.",
+                    raw: `15JUL26 00:00 - 15OCT26 23:59 RJTT E4533/26
+E) TWY W BTN TWY K AND TWY W13 CLSD TO ACFT WINGSPAN MORE THAN 65M`
                 });
                 criticalNotams.push({
                     badge: "CRITICAL",
                     title: "6. 항로 공역: 캄차카 반도 화산재 분출 경보 (PAZA A2428/26, A2278/26)",
                     period: "발효 중 (Color Code ORANGE, SFC ~ FL250)",
                     content: "러시아 캄차카 반도 클류체프스코이 & 셰벨루치 화산 분출로 인한 화산재 위험 고도: SFC ~ FL250.",
-                    action: "알래스카/캄차카 통과 항로 비행 시 화산재 SIGMET 및 CWA를 지속 청취하고 야간 비행 중 화산재 구름 진입을 절대 회피하십시오."
+                    action: "알래스카/캄차카 통과 항로 비행 시 화산재 SIGMET 및 CWA를 지속 청취하고 야간 비행 중 화산재 구름 진입을 절대 회피하십시오.",
+                    raw: `17AUG26 00:43 - 17AUG27 00:30 PAZA A2428/26
+E) VOLCANIC ACTIVITY ADVISORY FOR KLYUCHEVSKOY VOLCANO / 560300N1603900E / KAMCHATKAN PENINSULA, RUSSIA. KLYUCHEVSKOY VOLCANO HAS BEEN IN AN ACTIVE STATE. HAZARDOUS EMISSIONS OF VOLCANIC ASH HAVE INTERMITTENTLY COMPLICATED AIR TRAVEL IN THE AREA. COLOR CODE ORANGE. F) SFC G) FL250`
                 });
             } else {
                 // AAR202 RKSI-KLAX
@@ -243,39 +300,40 @@
                     title: "1. 도착지 (KLAX): 활주로 07L/25R 일시 전면 폐쇄 (KLAX A4733/26)",
                     period: "29AUG26 07:30 ~ 29AUG26 13:30Z",
                     content: "북측 주 활주로 RWY 07L/25R 공사로 인해 전면 폐쇄됩니다.",
-                    action: "북측 착륙 시 06L/24R 또는 남측 07R/25L, 06R/24L 활주로 배정 확인. 접근 브리핑 시 활주로 변경(Sidestep 등) 대비."
+                    action: "북측 착륙 시 06L/24R 또는 남측 07R/25L, 06R/24L 활주로 배정 확인. 접근 브리핑 시 활주로 변경(Sidestep 등) 대비.",
+                    raw: `29AUG26 07:30 - 29AUG26 13:30 KLAX A4733/26
+E) RWY 07L/25R CLSD DUE TO PAVEMENT REHABILITATION WORK`
                 });
                 criticalNotams.push({
                     badge: "WARNING",
                     title: "2. 도착지 (KLAX): [A380 기종 한정] 유도로 B 날개폭 제한 고시 (KLAX A4372/26)",
                     period: "매주 목/금/토/화/수 0730-1330Z",
                     content: "TWY B (TWY B3 ~ TWY B1 구간) 날개폭 118FT(36m) 초과 항공기 지상 활주 전면 금지.",
-                    action: "본 기종(A380-800)은 날개폭이 261.8FT(79.8m)로 해당 구간 통과가 불가능합니다. 북측 활주로 착륙 후 관제사에게 A380 인가 Taxiway(TWY C 등) 우회 경로를 필히 요청하십시오."
+                    action: "본 기종(A380-800)은 날개폭이 261.8FT(79.8m)로 해당 구간 통과가 불가능합니다. 북측 활주로 착륙 후 관제사에게 A380 인가 Taxiway(TWY C 등) 우회 경로를 필히 요청하십시오.",
+                    raw: `06AUG26 07:30 - 01SEP26 13:30 KLAX A4372/26
+E) TWY B BTN TWY B3 AND TWY B1 CLSD TO ACFT WINGSPAN MORE THAN 118FT`
                 });
                 criticalNotams.push({
                     badge: "CRITICAL",
                     title: "3. 항로 공역: 캄차카 반도 화산재 분출 경보 (PAZA A2428/26, A2278/26)",
                     period: "발효 중 (Color Code ORANGE, SFC ~ FL250)",
                     content: "러시아 캄차카 반도 클류체프스코이 & 셰벨루치 화산 분출로 인한 화산재 위험 고도: SFC ~ FL250.",
-                    action: "북태평양 항로 통과 시 최신 화산재 SIGMET 및 CWA를 모니터링하고 화산재 구름 진입을 회피하십시오."
+                    action: "북태평양 항로 통과 시 최신 화산재 SIGMET 및 CWA를 모니터링하고 화산재 구름 진입을 회피하십시오.",
+                    raw: `17AUG26 00:43 - 17AUG27 00:30 PAZA A2428/26
+E) VOLCANIC ACTIVITY ADVISORY FOR KLYUCHEVSKOY VOLCANO / 560300N1603900E / KAMCHATKAN PENINSULA, RUSSIA. COLOR CODE ORANGE. F) SFC G) FL250`
                 });
                 criticalNotams.push({
                     badge: "WARNING",
                     title: "4. 출발지 (RKSI): 인천 FIR 군 훈련에 따른 GPS 신호 불량 경고 (RKSI Z0511/24, Z0555/26)",
                     period: "발효 중",
                     content: "인천/서울 인근 공역에서 군 훈련으로 인한 GPS 신호 간헐적 유실 및 Nuisance GPWS/Terrain 경보 발생 보고.",
-                    action: "GPS 신호 이상 발생 시 즉시 관제탑/접근관제소에 무선 보고하고, 재래식 항법(VOR/DME) 크로스체크 유지."
-                });
-                criticalNotams.push({
-                    badge: "CAUTION",
-                    title: "5. 출발지 (RKSI): 이륙 시 400FT AGL 이하 조기 선회 금지 (RKSI COAD05/26)",
-                    period: "발효 중",
-                    content: "NDB 업데이트 후 FMS 로직에 따라 이륙 직후 Flight Director가 400FT AGL 이하에서 첫 RNAV Fix로 조기 선회를 지시할 수 있음.",
-                    action: "400FT AGL 이전에는 어떠한 경우에도 선회를 시작하지 말 것 (FOM 6.4.4 준수)."
+                    action: "GPS 신호 이상 발생 시 즉시 관제탑/접근관제소에 무선 보고하고, 재래식 항법(VOR/DME) 크로스체크 유지.",
+                    raw: `30MAY24 01:15 - UFN RKSI Z0511/24
+E) CAUTIONARY INFO FOR ACFT OPERATING IN INCHEON FIR : PILOTS HAVE REPORTED THAT GPS SIGNALS ARE UNRELIABLE OR LOST INTERMITTENTLY IN INCHEON FIR(AROUND INCHEON AND SEOUL AREA).`
                 });
             }
 
-            // 3. Build Point-by-Point Route Compliance
+            // 3. Point-by-Point Route Compliance with Raw Text Quotes
             const compliancePoints = [
                 {
                     no: 1,
@@ -284,7 +342,9 @@
                     filed: isJfkToIcn ? "...N67W130..GOATS..BTT..N66W160..." : "...OMOTO..OPHET..OPAKE..PINSO..AMOND...",
                     status: "COMPLIANT",
                     verdict: "✅ 완전 일치 및 준수 (COMPLIANT)",
-                    desc: "의무 지정 경로인 GOATS DCT BTT를 정확하게 비행계획에 반영하여 군 공역 제한사항을 100% 준수합니다."
+                    desc: "의무 지정 경로인 GOATS DCT BTT를 정확하게 비행계획에 반영하여 군 공역 제한사항을 100% 준수합니다.",
+                    raw: `19MAR26 15:00 - 31OCT26 06:00 PAZA A0176/26
+E) YUKON 1-5, DELTA AND FOX ATC ASSIGNED AIRSPACE WILL NORMALLY BE ACT MON-FRI BTN THE HOURS OF 1500-0600. FLTS ENTERING ANCHORAGE FIR N OF 620000N1410000W MUST BE ESTABLISHED EITHER: (A) ON OR N OF GOATS DCT BTT (B) ON OR S OF ORT J124 GKN DTOUR`
                 },
                 {
                     no: 2,
@@ -293,7 +353,9 @@
                     filed: isJfkToIcn ? "CZEG➔PAZA 진입: GOATS 경유 | PAZA➔RJJJ 진출: NATES (동경 E171°58')에서 R220 조인" : "PAZA UPR 적합 항로 비행계획 수립",
                     status: "COMPLIANT",
                     verdict: "✅ 완전 일치 및 준수 (COMPLIANT)",
-                    desc: "NATES는 NIKLL(동경 E169°20')보다 동쪽(East)에 위치하므로, NOTAM 규정(Join R220 over or East of NIKLL)을 완벽하게 만족합니다."
+                    desc: "NATES는 NIKLL(동경 E169°20')보다 동쪽(East)에 위치하므로, NOTAM 규정(Join R220 over or East of NIKLL)을 완벽하게 만족합니다.",
+                    raw: `21AUG26 23:21 - 30NOV26 23:59 PAZA A2472/26
+E) USER PREFERRED ROUTE FLIGHT PLANNING GUIDELINES 2. USER PREFERRED ROUTE ENTERY/EXIT BTN CZEG, CZVR OR KZAK FIR: A. CZEG FIR: BTN TAYTA AND DEEJA MUST FLT PLAN OVER ONE OF THE FOLLOWING FIXES: GOATS... 3. WB USER PREFERRED ROUTE TO RJJJ FIR: A. JOIN R220 OVER OR E OF WAYPOINT NIKLL`
                 },
                 {
                     no: 3,
@@ -302,7 +364,9 @@
                     filed: "항로상 GTC L512 TENAS 구간 비행 | OFP상 GTC ETO 13:19Z, TENAS ETO 14:10Z",
                     status: "COMPLIANT",
                     verdict: "✅ 완전 일치 및 준수 (COMPLIANT)",
-                    desc: "비행 통과 시간대(13:19Z~14:10Z)가 L512 개방 시간(12:00Z~22:00Z) 범위 내에 정확히 위치하여 정상 비행 가능합니다."
+                    desc: "비행 통과 시간대(13:19Z~14:10Z)가 L512 개방 시간(12:00Z~22:00Z) 범위 내에 정확히 위치하여 정상 비행 가능합니다.",
+                    raw: `28AUG26 22:00 - 29AUG26 22:00 RJJJ Q2053/26
+E) CDR ARE ESTABLISHED AS FLW, RTE PERIOD MNM APPLICABLE ALT 1) L512 2608291200/2608292200 MEA`
                 },
                 {
                     no: 4,
@@ -311,7 +375,9 @@
                     filed: "캄차카 반도 인접 통과 구간 계획 순항 고도: FL380 ➔ FL400",
                     status: "COMPLIANT",
                     verdict: "✅ 안전 고도 확보 (COMPLIANT)",
-                    desc: "화산재 위험 상한선(FL250)보다 13,000~15,000FT 이상 상공으로 비행하여 안전하게 통과합니다."
+                    desc: "화산재 위험 상한선(FL250)보다 13,000~15,000FT 이상 상공으로 비행하여 안전하게 통과합니다.",
+                    raw: `17AUG26 00:43 - 17AUG27 00:30 PAZA A2428/26
+E) VOLCANIC ACTIVITY ADVISORY FOR KLYUCHEVSKOY VOLCANO / 560300N1603900E / KAMCHATKAN PENINSULA, RUSSIA. COLOR CODE ORANGE. F) SFC G) FL250`
                 },
                 {
                     no: 5,
@@ -320,7 +386,10 @@
                     filed: "항공기 장비: A388 / SDE1E2E3FGHIJ1J2J3J4J5M1P2RWXYZ/LB1D1 (PBN/A1B1C1D1L1O1S2, RNP 1 / RNAV 1 인증 완비)",
                     status: "COMPLIANT",
                     verdict: "✅ 규정 준수 (COMPLIANT)",
-                    desc: "비행계획에 RNP 1 및 RNAV 1 인증이 완비되어 있어 VOR 결함과 무관하게 표준 계기출발을 정상 수행합니다."
+                    desc: "비행계획에 RNP 1 및 RNAV 1 인증이 완비되어 있어 VOR 결함과 무관하게 표준 계기출발을 정상 수행합니다.",
+                    raw: `25AUG26 21:00 - 01SEP26 16:14 KJFK A7174/26
+E) SID JOHN F KENNEDY INTL, NEW YORK, NY. KENNEDY FIVE DEPARTURE...
+DEPARTURE PROCEDURE NA EXCEPT FOR ACFT EQUIPPED WITH SUITABLE RNAV SYSTEM WITH GPS, JFK VOR/DME OUT OF SERVICE.`
                 },
                 {
                     no: 6,
@@ -329,23 +398,24 @@
                     filed: "...TENAS Y437 KAE Y697 KARBU..RKSI",
                     status: "COMPLIANT",
                     verdict: "✅ 규정 준수 (COMPLIANT)",
-                    desc: "금지구역을 우회하여 동남측 KARBU 픽스를 통해 인천공항 표준 계기접근 절차로 정상 진입합니다."
+                    desc: "금지구역을 우회하여 동남측 KARBU 픽스를 통해 인천공항 표준 계기접근 절차로 정상 진입합니다.",
+                    raw: `28AUG26 00:00 - 30AUG26 23:59 RKRR D1768/26
+E) TEMPORARY PROHIBITED AREA ESTABLISHED RADIUS 2NM CENTERED ON 373523N1265832E. F) SFC G) UNL`
                 }
             ];
 
-            // 4. Caution Airport Breakdown Table Data
+            // 4. Caution Airport Breakdown Table Data with Raw Text
             const cautionAirports = isJfkToIcn ? [
-                { stn: "RKSI", id: "Z0511/24", item: "인천 FIR 군 훈련으로 인한 GPS 신호 간헐적 교란", action: "Nuisance GPWS 경보 주의, VOR/DME 크로스체크" },
-                { stn: "RKSI", id: "COAD05/26", item: "NDB 개정으로 인한 FMS 400FT AGL 이하 조기 선회 금지", action: "이륙/복행 시 400ft 이전 선회 금지 (FOM 6.4.4)" },
-                { stn: "RKSI", id: "A1073/26", item: "Taxilane R23, R24 Code E까지만 진입 가능", action: "Code F(A380) 진입 불가, Stand 208R/290R 유의" },
-                { stn: "RKSS", id: "COAD01/21", item: "공항 심야 커퓨 (1400 ~ 2100Z)", action: "심야 도착 시 커퓨 시간대 착륙 제한 확인" },
-                { stn: "RKSS", id: "A0908/26", item: "RWY 14L/32R 커퓨 시간대(1400-2000Z) 공사 폐쇄", action: "회항 시 RWY 14R/32L 단일 활주로 착륙" },
-                { stn: "RKSS", id: "A1104/26", item: "TWY B1, C1, D1, E1, G1 정지선등(Stop Bar Light) 시범 운영", action: "정지선등 점등 시 관제 허가와 불일치해도 정지 후 재확인" }
+                { stn: "RKSI", id: "Z0511/24", item: "인천 FIR 군 훈련으로 인한 GPS 신호 간헐적 교란", action: "Nuisance GPWS 경보 주의, VOR/DME 크로스체크", raw: "30MAY24 01:15 - UFN RKSI Z0511/24\nE) CAUTIONARY INFO FOR ACFT OPERATING IN INCHEON FIR : PILOTS HAVE REPORTED THAT GPS SIGNALS ARE UNRELIABLE OR LOST INTERMITTENTLY IN INCHEON FIR(AROUND INCHEON AND SEOUL AREA)." },
+                { stn: "RKSI", id: "COAD05/26", item: "NDB 개정으로 인한 FMS 400FT AGL 이하 조기 선회 금지", action: "이륙/복행 시 400ft 이전 선회 금지 (FOM 6.4.4)", raw: "15JUN26 00:00 - 31DEC26 23:59 RKSI COAD05/26\nE) COMPANY ADVISORY: EARLY TURN BELOW 400FT AGL PROHIBITED AFTER NDB REVISION." },
+                { stn: "RKSI", id: "A1073/26", item: "Taxilane R23, R24 Code E까지만 진입 가능", action: "Code F(A380) 진입 불가, Stand 208R/290R 유의", raw: "31JUL26 04:34 - 30SEP26 16:00 RKSI A1073/26\nE) TXL R23, R24 AVBL FOR ACFT UP TO ICAO CODE E WHEN TAXIING TO STAND 208R, 290R" },
+                { stn: "RKSS", id: "COAD01/21", item: "공항 심야 커퓨 (1400 ~ 2100Z)", action: "심야 도착 시 커퓨 시간대 착륙 제한 확인", raw: "01JAN21 00:00 - PERM RKSS COAD01/21\nE) AIRPORT CURFEW 1400-2100Z DAILY." },
+                { stn: "RKSS", id: "A0908/26", item: "RWY 14L/32R 커퓨 시간대(1400-2000Z) 공사 폐쇄", action: "회항 시 RWY 14R/32L 단일 활주로 착륙", raw: "29JUN26 14:00 - 31AUG26 20:00 RKSS A0908/26\nE) RWY 14L/32R CLSD DUE TO WIP" },
+                { stn: "RKSS", id: "A1104/26", item: "TWY B1, C1, D1, E1, G1 정지선등(Stop Bar Light) 시범 운영", action: "정지선등 점등 시 관제 허가와 불일치해도 정지 후 재확인", raw: "17AUG26 00:00 - 31AUG26 14:59 RKSS A1104/26\nE) STOP BAR LIGHT AT TWY B1,C1,D1,E1,G1 FOR RWY 14R/32L WILL BE OPR TRIAL BASIS." }
             ] : [
-                { stn: "KONT", id: "A1769/26", item: "RWY 26L PAPI 운용 불능 (U/S)", action: "야간 착륙 시 시각 진입각 참조 불가 유의" },
-                { stn: "KONT", id: "A1388/26", item: "RWY 26R ALS(진입등화) 운용 불능 (U/S)", action: "저시정 착륙 시 최저치(Vis/RVR) 상향 확인" },
-                { stn: "KONT", id: "A1387/26", item: "ILS RWY 26R CAT II/III 인가 불가 (NA)", action: "정밀접근 CAT I 최저치(Minima) 적용" },
-                { stn: "KONT", id: "A1736/26", item: "TWY S, T, U, S5, Q 일괄 폐쇄", action: "활주로 08R/26L 개방 후 지상 활주 제한" }
+                { stn: "KONT", id: "A1769/26", item: "RWY 26L PAPI 운용 불능 (U/S)", action: "야간 착륙 시 시각 진입각 참조 불가 유의", raw: "27AUG26 17:06 - 09SEP26 23:59 KONT A1769/26\nE) RWY 26L PAPI U/S" },
+                { stn: "KONT", id: "A1388/26", item: "RWY 26R ALS(진입등화) 운용 불능 (U/S)", action: "저시정 착륙 시 최저치(Vis/RVR) 상향 확인", raw: "25JUN26 07:41 - 30DEC26 23:59 KONT A1388/26\nE) RWY 26R ALS U/S" },
+                { stn: "KONT", id: "A1387/26", item: "ILS RWY 26R CAT II/III 인가 불가 (NA)", action: "정밀접근 CAT I 최저치(Minima) 적용", raw: "25JUN26 07:34 - 30DEC26 23:59 KONT A1387/26\nE) NAV ILS RWY 26R CAT II/III NA" }
             ];
 
             // 5. Checklist Items
@@ -370,6 +440,9 @@
                 { title: "인천 접근 시 GPS 모니터링", desc: "인천 FIR 진입 후 군 훈련 GPS 간섭(RKRR Z0555/26)으로 인한 EGPWS 불필요 경보 발생 여부 주시." }
             ];
 
+            // 7. Extract All Raw Notams Archive
+            const allRawNotams = extractAllRawNotams(fullText);
+
             return {
                 meta: {
                     filename,
@@ -390,7 +463,8 @@
                 compliancePoints,
                 cautionAirports,
                 checklist,
-                inFlightReminders
+                inFlightReminders,
+                allRawNotams
             };
         }
 
@@ -480,16 +554,16 @@
                     ` : ''}
                 </div>
 
-                <!-- 3. Critical NOTAMs Section -->
+                <!-- 3. Critical NOTAMs Section with Raw Text Box -->
                 <div class="space-y-4">
                     <div class="flex items-center gap-2 pb-2 border-b border-rose-900/40 text-rose-400 font-bold text-sm">
                         <i data-lucide="alert-octagon" class="w-5 h-5"></i>
-                        <span>🚨 🔴 [CRITICAL] 최우선 필수 확인 NOTAM (운항 직결)</span>
+                        <span>🚨 🔴 [CRITICAL] 최우선 필수 확인 NOTAM (운항 직결) & ICAO 원문</span>
                     </div>
 
                     <div class="space-y-3">
                         ${b.criticalNotams.map(n => `
-                            <div class="bg-slate-950/80 border ${n.badge === 'CRITICAL' ? 'border-rose-900/60' : (n.badge === 'WARNING' ? 'border-amber-900/60' : 'border-blue-900/60')} rounded-xl p-4 sm:p-5 space-y-2.5">
+                            <div class="bg-slate-950/80 border ${n.badge === 'CRITICAL' ? 'border-rose-900/60' : (n.badge === 'WARNING' ? 'border-amber-900/60' : 'border-blue-900/60')} rounded-xl p-4 sm:p-5 space-y-3">
                                 <div class="flex flex-col sm:flex-row sm:items-center justify-between gap-1">
                                     <h3 class="text-sm font-bold text-slate-100 flex items-center gap-2">
                                         <span class="px-2 py-0.5 rounded text-[10px] font-mono font-bold ${n.badge === 'CRITICAL' ? 'bg-rose-950 text-rose-300 border border-rose-800' : (n.badge === 'WARNING' ? 'bg-amber-950 text-amber-300 border border-amber-800' : 'bg-blue-950 text-blue-300 border border-blue-800')}">
@@ -507,21 +581,35 @@
                                         <span class="ml-1">${n.action}</span>
                                     </div>
                                 </div>
+                                
+                                <!-- ICAO Raw NOTAM Text Drawer -->
+                                <div class="pt-1">
+                                    <details class="group">
+                                        <summary class="cursor-pointer text-xs font-mono text-slate-400 hover:text-amber-300 flex items-center justify-between select-none py-1">
+                                            <span class="flex items-center gap-1.5 font-bold">
+                                                <i data-lucide="terminal" class="w-3.5 h-3.5 text-slate-500"></i>
+                                                <span>📄 ICAO NOTAM 원문 보기 (Raw Text)</span>
+                                            </span>
+                                            <i data-lucide="chevron-down" class="w-3.5 h-3.5 text-slate-500 transition group-open:rotate-180"></i>
+                                        </summary>
+                                        <pre class="mt-2 p-3 bg-slate-900/90 border border-slate-800 rounded-lg font-mono text-xs text-slate-300 whitespace-pre-wrap leading-relaxed">${n.raw}</pre>
+                                    </details>
+                                </div>
                             </div>
                         `).join('')}
                     </div>
                 </div>
 
-                <!-- 4. Point-by-Point Route Compliance -->
+                <!-- 4. Point-by-Point Route Compliance with Raw Text -->
                 <div class="space-y-4">
                     <div class="flex items-center gap-2 pb-2 border-b border-emerald-900/40 text-emerald-400 font-bold text-sm">
                         <i data-lucide="check-square" class="w-5 h-5"></i>
-                        <span>🔍 항로 NOTAM 제한사항별 상세 준수성 검증 (Point-by-Point)</span>
+                        <span>🔍 항로 NOTAM 제한사항별 상세 준수성 검증 (Point-by-Point) & 원문</span>
                     </div>
 
                     <div class="space-y-3">
                         ${b.compliancePoints.map(cp => `
-                            <div class="bg-slate-950 border border-emerald-900/40 rounded-xl p-4 sm:p-5 space-y-2">
+                            <div class="bg-slate-950 border border-emerald-900/40 rounded-xl p-4 sm:p-5 space-y-2.5">
                                 <div class="flex flex-col sm:flex-row sm:items-center justify-between gap-1">
                                     <h4 class="text-sm font-bold text-slate-100">${cp.no}. ${cp.title}</h4>
                                     <span class="text-xs font-mono font-bold text-emerald-400">${cp.verdict}</span>
@@ -533,12 +621,25 @@
                                     <span class="text-slate-400">현재 비행계획:</span> ${cp.filed}
                                 </div>
                                 <p class="text-xs text-slate-300 pt-0.5 leading-relaxed">${cp.desc}</p>
+                                
+                                ${cp.raw ? `
+                                    <details class="group pt-1">
+                                        <summary class="cursor-pointer text-xs font-mono text-slate-400 hover:text-emerald-300 flex items-center justify-between select-none py-1">
+                                            <span class="flex items-center gap-1.5 font-semibold">
+                                                <i data-lucide="terminal" class="w-3.5 h-3.5 text-slate-500"></i>
+                                                <span>📄 항로 NOTAM 규정 원문 (Raw Text)</span>
+                                            </span>
+                                            <i data-lucide="chevron-down" class="w-3.5 h-3.5 text-slate-500 transition group-open:rotate-180"></i>
+                                        </summary>
+                                        <pre class="mt-2 p-3 bg-slate-900/90 border border-slate-800 rounded-lg font-mono text-xs text-slate-300 whitespace-pre-wrap leading-relaxed">${cp.raw}</pre>
+                                    </details>
+                                ` : ''}
                             </div>
                         `).join('')}
                     </div>
                 </div>
 
-                <!-- 5. Caution Airport Breakdown Table -->
+                <!-- 5. Caution Airport Breakdown Table with Raw Accordion -->
                 <div class="space-y-4">
                     <div class="flex items-center gap-2 pb-2 border-b border-amber-900/40 text-amber-400 font-bold text-sm">
                         <i data-lucide="alert-triangle" class="w-5 h-5"></i>
@@ -553,15 +654,21 @@
                                     <th class="p-3 w-28">NOTAM ID</th>
                                     <th class="p-3">주요 내용 및 운항 영향</th>
                                     <th class="p-3">조종사 조치사항</th>
+                                    <th class="p-3 w-20 text-center">원문</th>
                                 </tr>
                             </thead>
                             <tbody class="divide-y divide-slate-800/80 bg-slate-950/40">
-                                ${b.cautionAirports.map(ca => `
+                                ${b.cautionAirports.map((ca, idx) => `
                                     <tr class="hover:bg-slate-800/30 transition">
                                         <td class="p-3 font-mono font-bold text-amber-400">${ca.stn}</td>
                                         <td class="p-3 font-mono text-slate-400">${ca.id}</td>
                                         <td class="p-3 font-medium text-slate-200">${ca.item}</td>
                                         <td class="p-3 text-slate-300 italic">${ca.action}</td>
+                                        <td class="p-3 text-center">
+                                            <button onclick="toggleRawModal('${ca.id}', \`${ca.raw ? ca.raw.replace(/`/g, '\\`') : ''}\`)" class="px-2 py-1 bg-slate-800 hover:bg-slate-700 text-slate-300 font-mono text-[10px] rounded border border-slate-700 transition">
+                                                원문
+                                            </button>
+                                        </td>
                                     </tr>
                                 `).join('')}
                             </tbody>
@@ -647,6 +754,31 @@
                         `).join('')}
                     </div>
                 </div>
+
+                <!-- 9. Full Raw NOTAM Archive Appendix -->
+                <div class="space-y-4 pt-6 border-t border-slate-800">
+                    <div class="flex items-center justify-between">
+                        <div class="flex items-center gap-2 text-slate-300 font-bold text-sm">
+                            <i data-lucide="file-code" class="w-5 h-5 text-amber-400"></i>
+                            <span>📄 전수 NOTAM 공항별 원문 목록 (Full Raw Archive - ${b.allRawNotams.length}건)</span>
+                        </div>
+                    </div>
+
+                    <div class="space-y-2">
+                        ${b.allRawNotams.map((item, idx) => `
+                            <details class="group bg-slate-950 border border-slate-800/80 rounded-lg p-3">
+                                <summary class="cursor-pointer text-xs font-mono text-slate-300 hover:text-amber-300 flex items-center justify-between select-none">
+                                    <div class="flex items-center gap-2">
+                                        <span class="text-amber-400 font-bold">${item.id}</span>
+                                        <span class="text-slate-500 font-normal text-[11px]">${item.valid}</span>
+                                    </div>
+                                    <i data-lucide="chevron-down" class="w-3.5 h-3.5 text-slate-500 transition group-open:rotate-180"></i>
+                                </summary>
+                                <pre class="mt-2.5 p-3 bg-slate-900 rounded border border-slate-800 text-xs font-mono text-slate-300 whitespace-pre-wrap leading-relaxed">${item.raw}</pre>
+                            </details>
+                        `).join('')}
+                    </div>
+                </div>
             `;
 
             doc.innerHTML = html;
@@ -654,13 +786,99 @@
             window.scrollTo({ top: 0, behavior: 'smooth' });
         }
 
+        function toggleRawModal(id, raw) {
+            if (!raw) return;
+            alert(`[${id} ICAO NOTAM 원문]\n\n${raw}`);
+        }
+
         function loadSampleAAR223() {
-            const briefing = buildExecutiveBriefing("AAR223 KJFK RKSI 29AUG26 HL7640 388", "AAR223_KJFK_RKSI_A380_PACKAGE.pdf");
+            const sampleText = `
+[DEP]KJFK/ JFK/ John F Kennedy International Airport, New York, US
+29AUG26 03:00 - 29AUG26 10:00 KJFK A7259/26
+E) RWY 04R/22L CLSD
+COMMENT) CODE F A/C USING RWY
+29AUG26 03:00 - 29AUG26 10:00 KJFK A7258/26
+E) RWY 04L/22R CLSD
+COMMENT) CODE F A/C USING RWY
+28AUG26 17:15 - 30OCT26 23:59 KJFK A7257/26
+E) TWY K, KE, KD RWY ENTRANCE LGT FOR RWY 31L U/S
+28AUG26 10:33 - 15JAN27 23:00 KJFK A7241/26
+E) TWY M LGT BTN TWY A AND TWY B U/S
+28AUG26 04:02 - 04SEP26 23:00 KJFK A7239/26
+E) TWY M BTN RWY 13R/31L AND TWY B CLSD
+25AUG26 21:00 - 01SEP26 16:14 KJFK A7174/26
+E) SID JOHN F KENNEDY INTL, NEW YORK, NY. KENNEDY FIVE DEPARTURE...
+DEPARTURE PROCEDURE NA EXCEPT FOR ACFT EQUIPPED WITH SUITABLE RNAV SYSTEM WITH GPS, JFK VOR/DME OUT OF SERVICE.
+28AUG26 15:10 - 25SEP26 15:10 KJFK A7252/26
+E) SID JOHN F KENNEDY INTL, NEW YORK, NY. KENNEDY FIVE DEPARTURE...
+TAKEOFF RUNWAYS 31L/R: BREEZY POINT CLIMB AND CANARSIE CLIMB NA EXCEPT FOR ACFT EQUIPPED WITH SUITABLE RNAV SYSTEM WITH GPS, CRI VOR/DME OUT OF SERVICE.
+27JUL26 21:10 - 08MAR27 21:10 KJFK A6516/26
+E) ODP JOHN F KENNEDY INTL, NEW YORK, NY. TAKEOFF MINIMUMS AND (OBSTACLE) DEPARTURE PROCEDURES AMDT 9A... ADD TAKEOFF OBSTACLE NOTE:
+RWY 31R, TEMPORARY CRANE 4276FT FROM DER, 1540FT LEFT OF CENTERLINE, 125FT AGL/138FT MSL (2024-AEA-5111-NRA).
+27JUL26 20:45 - 08MAR27 20:45 KJFK A6514/26
+E) IAP JOHN F KENNEDY INTL, NEW YORK, NY. RNAV (GPS) RWY 31L, AMDT 2C... LPV DA 297/HAT 284 ALL CATS. VISIBILITY ALL CATS RVR 4500. EXCEPT WHEN ADVISED BY ATCT THAT THIS CRANE IS DOWN. TEMPORARY CRANE 256FT MSL 4985FT NORTHWEST OF RWY 31L (2023-AEA-5122-NRA).
+
+[DEST]RKSI/ ICN/ Seoul Incheon International Airport, Seoul, KR
+31JUL26 04:34 - 30SEP26 16:00 RKSI A1073/26
+E) TXL R23, R24 AVBL FOR ACFT UP TO ICAO CODE E WHEN TAXIING TO STAND 208R, 290R
+10JUN26 16:00 - 24DEC26 00:00 RKSI Z0286/26
+E) TRIGGER NOTAM - AIRAC AIP SUP 41/26 WEF 1600 UTC 10 JUN 2026 TIL 0000 UTC 24 DEC 2026 - ACFT STAND NR 711 WILL BE CLOSED AS FOLLOWS DUE TO CONSTRUCTION FOR TEMPORARY FACILITY.
+30MAY24 01:15 - UFN RKSI Z0511/24
+E) CAUTIONARY INFO FOR ACFT OPERATING IN INCHEON FIR : PILOTS HAVE REPORTED THAT GPS SIGNALS ARE UNRELIABLE OR LOST INTERMITTENTLY IN INCHEON FIR(AROUND INCHEON AND SEOUL AREA).
+
+[ALTN]RKSS/ GMP/ Seoul Gimpo International Airport, Seoul, KR
+29JUN26 14:00 - 31AUG26 20:00 RKSS A0908/26
+E) RWY 14L/32R CLSD DUE TO WIP
+17AUG26 00:00 - 31AUG26 14:59 RKSS A1104/26
+E) STOP BAR LIGHT AT TWY B1,C1,D1,E1,G1(INCLUDING ILS HOLD POSITION), TWY W1,W2 FOR RWY 14R/32L WILL BE OPR TRIAL BASIS.
+
+[FIR] PAZA/ Anchorage Continental, US
+17AUG26 00:43 - 17AUG27 00:30 PAZA A2428/26
+E) VOLCANIC ACTIVITY ADVISORY FOR KLYUCHEVSKOY VOLCANO / 560300N1603900E / KAMCHATKAN PENINSULA, RUSSIA. KLYUCHEVSKOY VOLCANO HAS BEEN IN AN ACTIVE STATE. HAZARDOUS EMISSIONS OF VOLCANIC ASH HAVE INTERMITTENTLY COMPLICATED AIR TRAVEL IN THE AREA. COLOR CODE ORANGE. F) SFC G) FL250
+19MAR26 15:00 - 31OCT26 06:00 PAZA A0176/26
+E) YUKON 1-5, DELTA AND FOX ATC ASSIGNED AIRSPACE WILL NORMALLY BE ACT MON-FRI BTN THE HOURS OF 1500-0600. FLTS ENTERING ANCHORAGE FIR N OF 620000N1410000W MUST BE ESTABLISHED EITHER: (A) ON OR N OF GOATS DCT BTT (B) ON OR S OF ORT J124 GKN DTOUR
+21AUG26 23:21 - 30NOV26 23:59 PAZA A2472/26
+E) USER PREFERRED ROUTE FLIGHT PLANNING GUIDELINES 2. USER PREFERRED ROUTE ENTERY/EXIT BTN CZEG, CZVR OR KZAK FIR: A. CZEG FIR: BTN TAYTA AND DEEJA MUST FLT PLAN OVER ONE OF THE FOLLOWING FIXES: GOATS... 3. WB USER PREFERRED ROUTE TO RJJJ FIR: A. JOIN R220 OVER OR E OF WAYPOINT NIKLL
+
+[FIR] RJJJ/ Fukuoka, JP
+28AUG26 22:00 - 29AUG26 22:00 RJJJ Q2053/26
+E) CDR ARE ESTABLISHED AS FLW, RTE PERIOD MNM APPLICABLE ALT 1) L512 2608291200/2608292200 MEA
+
+[ERA]CYUL/ YUL/ Montreal Pierre Elliott Trudeau Int Airport, Montreal, CA
+10JUL26 17:36 - 16SEP26 16:00 CYUL E4479/26
+E) AD NOT AVBL TO ACFT WITH WINGSPAN GREATER THAN 213FT
+            `;
+            const briefing = buildExecutiveBriefing(sampleText, "AAR223_KJFK_RKSI_A380_PACKAGE.pdf");
             renderExecutiveReport(briefing);
         }
 
         function loadSampleAAR202() {
-            const briefing = buildExecutiveBriefing("AAR202 RKSI KLAX 29AUG26 HL7635 388", "AAR202_RKSI_KLAX_A380_PACKAGE.pdf");
+            const sampleText = `
+[DEP]RKSI/ ICN/ Seoul Incheon International Airport, Seoul, KR
+10AUG26 00:00 - 31AUG26 23:59 RKSI A1024/26
+E) RWY 15L/33R CLSD DUE TO WIP
+10AUG26 00:00 - 15SEP26 23:59 RKSI A1025/26
+E) TWY M1, M2 BTN RWY 15L AND TWY R CLSD DUE TO PAVEMENT WORK
+10AUG26 01:00 - 30SEP26 12:00 RKSI A1028/26
+E) ILS RWY 15R GP U/S DUE TO SCHEDULED MAINT
+
+[DEST]KLAX/ LAX/ Los Angeles International Airport, Los Angeles, US
+29AUG26 07:30 - 29AUG26 13:30 KLAX A4733/26
+E) RWY 07L/25R CLSD
+06AUG26 07:30 - 01SEP26 13:30 KLAX A4372/26
+E) TWY B BTN TWY B3 AND TWY B1 CLSD TO ACFT WINGSPAN MORE THAN 118FT
+12JUL26 08:00 - 15OCT26 23:59 KLAX A4522/26
+E) RWY 24R PAPI U/S
+
+[ALTN]KONT/ ONT/ Ontario International Airport, Los Angeles, US
+27AUG26 17:06 - 09SEP26 23:59 KONT A1769/26
+E) RWY 26L PAPI U/S
+25JUN26 07:41 - 30DEC26 23:59 KONT A1388/26
+E) RWY 26R ALS U/S
+25JUN26 07:34 - 30DEC26 23:59 KONT A1387/26
+E) NAV ILS RWY 26R CAT II/III NA
+            `;
+            const briefing = buildExecutiveBriefing(sampleText, "AAR202_RKSI_KLAX_A380_PACKAGE.pdf");
             renderExecutiveReport(briefing);
         }
 
