@@ -19,8 +19,8 @@
     <!-- PDF.js CDN (Mozilla) -->
     <script src="https://cdnjs.cloudflare.com/ajax/libs/pdf.js/3.11.174/pdf.min.js"></script>
     <!-- Pre-bundled Full Flight Datasets for Instant Preview -->
-    <script src="./aar223_text.js?v=2.2"></script>
-    <script src="./aar202_text.js?v=2.2"></script>
+    <script src="./aar223_text.js?v=2.3"></script>
+    <script src="./aar202_text.js?v=2.3"></script>
 
     <script>
         pdfjsLib.GlobalWorkerOptions.workerSrc = 'https://cdnjs.cloudflare.com/ajax/libs/pdf.js/3.11.174/pdf.worker.min.js';
@@ -43,13 +43,13 @@
         ::-webkit-scrollbar-track { background: #0f172a; }
         ::-webkit-scrollbar-thumb { background: #334155; border-radius: 3px; }
         .shaded-item {
-            opacity: 0.45;
-            filter: grayscale(80%);
-            border-color: rgba(51, 65, 85, 0.4) !important;
-            background-color: rgba(15, 23, 42, 0.6) !important;
+            opacity: 0.5;
+            filter: grayscale(70%);
+            border-color: rgba(51, 65, 85, 0.5) !important;
+            background-color: rgba(15, 23, 42, 0.7) !important;
         }
         .shaded-item:hover {
-            opacity: 0.9;
+            opacity: 0.95;
             filter: grayscale(0%);
         }
         @media print {
@@ -111,10 +111,10 @@
                 <div class="pt-2 flex flex-wrap items-center justify-center gap-2" onclick="event.stopPropagation()">
                     <span class="text-xs text-slate-500">샘플 즉시 보기:</span>
                     <button onclick="loadSampleAAR223()" class="px-2.5 py-1 rounded bg-slate-800 hover:bg-slate-700 border border-slate-700 text-xs font-mono text-amber-300">
-                        AAR223 (JFK ➔ ICN, 491건)
+                        AAR223 (JFK ➔ ICN, 491건 전수)
                     </button>
                     <button onclick="loadSampleAAR202()" class="px-2.5 py-1 rounded bg-slate-800 hover:bg-slate-700 border border-slate-700 text-xs font-mono text-amber-300">
-                        AAR202 (ICN ➔ LAX, 335건)
+                        AAR202 (ICN ➔ LAX, 335건 전수)
                     </button>
                 </div>
             </div>
@@ -123,7 +123,7 @@
         <!-- Processing Indicator -->
         <div id="loadingIndicator" class="hidden bg-slate-900 border border-slate-800 rounded-xl p-8 text-center space-y-3 no-print">
             <div class="w-8 h-8 border-2 border-amber-400 border-t-transparent rounded-full animate-spin mx-auto"></div>
-            <p class="text-sm font-medium text-slate-200">PDF 전문 추출 및 전수 원문 나열/스마트 음영 처리 중...</p>
+            <p class="text-sm font-medium text-slate-200">PDF 전문 추출 및 전수 원문 나열/음영 이유 분석 중...</p>
             <p class="text-xs text-slate-500">클라이언트 브라우저에서 100% 안전하게 계산됩니다 (API 0회)</p>
         </div>
 
@@ -135,7 +135,7 @@
                 <!-- Executive Briefing populated here -->
             </article>
 
-            <!-- Section 2: Full Raw NOTAM List with Interactive Shading -->
+            <!-- Section 2: Full Raw NOTAM List with Interactive Shading & Reason Descriptions -->
             <section id="rawNotamWorkbench" class="bg-slate-900 border border-slate-800 rounded-2xl p-6 sm:p-10 shadow-2xl space-y-6">
                 
                 <!-- Section Header & Smart Shading Metrics -->
@@ -148,11 +148,11 @@
                             <div>
                                 <div class="flex items-center gap-2">
                                     <h2 class="text-lg sm:text-xl font-black text-white tracking-wide">
-                                        📄 비행계획서 NOTAM 전수 원문 나열 & 스마트 음영(Shading)
+                                        📄 비행계획서 NOTAM 전수 원문 나열 & 음영 이유 상세 기술
                                     </h2>
                                 </div>
                                 <p class="text-xs text-slate-400 mt-0.5">
-                                    비행계획서 내 모든 원문을 그대로 표시하며, 비운항시간·비운항항로·등화·표지 관련 NOTAM은 자동 음영 처리됩니다.
+                                    비행계획서 내 모든 원문을 그대로 표시하며, 음영 처리된 모든 항목에는 <strong>음영 처리 이유 및 운항 미영향 사유가 상세 기술</strong>됩니다.
                                 </p>
                             </div>
                         </div>
@@ -211,16 +211,17 @@
                             <button onclick="filterByReason('ALL')" class="pill-reason active px-2.5 py-1 rounded text-xs font-mono bg-amber-500/15 border border-amber-500/40 text-amber-300" data-reason="ALL">전체 원문</button>
                             <button onclick="filterByReason('ACTIVE_ONLY')" class="pill-reason px-2.5 py-1 rounded text-xs font-mono bg-slate-900 border border-slate-800 text-emerald-400 hover:border-emerald-700" data-reason="ACTIVE_ONLY">🟢 유효 운항 NOTAM만</button>
                             <button onclick="filterByReason('LIGHTING')" class="pill-reason px-2.5 py-1 rounded text-xs font-mono bg-slate-900 border border-slate-800 text-slate-400 hover:text-slate-200" data-reason="LIGHTING">💡 등화 (Lighting)</button>
-                            <button onclick="filterByReason('MARKING')" class="pill-reason px-2.5 py-1 rounded text-xs font-mono bg-slate-900 border border-slate-800 text-slate-400 hover:text-slate-200" data-reason="MARKING">🎨 표지 (Marking)</button>
+                            <button onclick="filterByReason('MARKING')" class="pill-reason px-2.5 py-1 rounded text-xs font-mono bg-slate-900 border border-slate-800 text-slate-400 hover:text-slate-200" data-reason="MARKING">🎨 표지·도색 (Marking)</button>
                             <button onclick="filterByReason('NON_FLIGHT_TIME')" class="pill-reason px-2.5 py-1 rounded text-xs font-mono bg-slate-900 border border-slate-800 text-slate-400 hover:text-slate-200" data-reason="NON_FLIGHT_TIME">⏰ 비운항시간 외</button>
                             <button onclick="filterByReason('NON_FLIGHT_ROUTE')" class="pill-reason px-2.5 py-1 rounded text-xs font-mono bg-slate-900 border border-slate-800 text-slate-400 hover:text-slate-200" data-reason="NON_FLIGHT_ROUTE">🛣️ 비운항항로/VFR</button>
+                            <button onclick="filterByReason('OBSTACLE_LOW')" class="pill-reason px-2.5 py-1 rounded text-xs font-mono bg-slate-900 border border-slate-800 text-slate-400 hover:text-slate-200" data-reason="OBSTACLE_LOW">🏗️ 저고도 크레인/장애물</button>
                         </div>
                     </div>
                 </div>
 
                 <!-- Raw NOTAM Stack Container -->
                 <div id="rawNotamContainer" class="space-y-3">
-                    <!-- Dynamically rendered raw NOTAM items -->
+                    <!-- Dynamically rendered raw NOTAM items with detailed reasons -->
                 </div>
 
             </section>
@@ -236,7 +237,7 @@
         let userShadingMap = {}; // notamId -> boolean (true: shaded, false: active)
         let currentStationTab = 'ALL';
         let currentReasonFilter = 'ALL';
-        let viewOnlyActive = false; // if true, hide shaded items
+        let viewOnlyActive = false;
 
         /**
          * Extracts plain text from an uploaded PDF File object using PDF.js.
@@ -262,19 +263,12 @@
         }
 
         /**
-         * Determines if a NOTAM should be auto-shaded based on:
-         * 1. Lighting (ALS, PAPI, RCLL, TWY LGT, etc.)
-         * 2. Marking / Paint / Line WIP
-         * 3. Non-flight operating times (curfew hours outside flight window)
-         * 4. Non-flight routes (VFR only, low altitude, non-filed fixes)
-         * 5. Trigger NOTAMs (AIP SUP)
-         * 
-         * Critical items (Runway closure, ILS GP/LOC unserviceable, Volcanic ash, A380/Code F wing span limits) are NEVER auto-shaded.
+         * Determines if a NOTAM should be auto-shaded and generates a detailed Korean operational rationale.
          */
         function evaluateAutoShading(raw, station, fplRoute) {
             const upper = raw.toUpperCase();
 
-            // Never shade CRITICAL items
+            // 0. CRITICAL ITEMS (Never auto-shaded)
             const isCritical = (
                 (/\b(RWY|RUNWAY)\s+\d{1,2}[LCR]?\s+(?:CLSD|CLOSED|NOT AVBL|UNAVBL)\b/.test(upper) && !upper.includes("TWY M1 CLSD BTN")) ||
                 (/\b(ILS|LOC|GP|GLIDE PATH)\b/.test(upper) && /\b(U\/S|OTS|OUT OF SERVICE)\b/.test(upper)) ||
@@ -284,35 +278,94 @@
             );
 
             if (isCritical) {
-                return { isShaded: false, reasonCategory: "CRITICAL", reasonText: "🔴 운항 직결 필수 NOTAM (음영 불가)" };
+                return { 
+                    isShaded: false, 
+                    reasonCategory: "CRITICAL", 
+                    reasonBadge: "🔴 운항 직결 필수", 
+                    reasonDetail: "활주로 폐쇄, ILS/GP 결함, 화산재, 기종 한계 등 안전 운항 직결 필수 NOTAM으로 절대 음영 불가 대상입니다." 
+                };
             }
 
-            // 1. Marking / Painting / Signage
+            // 1. Lighting (ALS, PAPI, RCLL, TWY LGT, Stop Bar, etc.)
+            if (/\b(ALS|ALSF|MALSR|MALSF|SALS|SSALS|PAPI|VASI|RCLL|REDL|RTIL|TDZL|APPROACH LIGHT|TWY.*LGT|APRON.*LGT|OBST.*LGT|FLG LGT|STOP BAR.*TRIAL|ENTRY LGT.*U\/S|LGT U\/S|LIGHTING)\b/.test(upper)) {
+                let detail = "등화(Lighting) 정비/결함/시범운영 고시. 주간 운항 또는 정밀 계기접근 최저치(Minima)에 지장을 주지 않는 일반 등화 항목으로 자동 음영 처리함.";
+                if (upper.includes("PAPI") || upper.includes("VASI")) {
+                    detail = "시각 진입각 지시등(PAPI/VASI) 결함/점검 고시. 계기접근(ILS/RNAV) 및 CAT I/II/III 착륙 최저치 산정에 영향이 없어 음영 처리함.";
+                } else if (upper.includes("ALS") || upper.includes("ALSF") || upper.includes("MALSR")) {
+                    detail = "진입등화시스템(ALS) 점검/운용중단 고시. 시각 진입 보조 등화로 양호 기상 운항 시 영향이 없으므로 음영 처리함 (저시정 착륙 시에만 RVR 참조).";
+                } else if (upper.includes("TWY") || upper.includes("APRON") || upper.includes("ENTRY LGT") || upper.includes("STOP BAR")) {
+                    detail = "유도로등(TWY LGT)/정지선등/주기장 등화 정비 고시. 표준 지상 관제 유도선 및 조종사 시각 주시로 정상 지상 활주가 가능하여 음영 처리함.";
+                }
+                return { 
+                    isShaded: true, 
+                    reasonCategory: "LIGHTING", 
+                    reasonBadge: "💡 등화 (Lighting)", 
+                    reasonDetail: detail 
+                };
+            }
+
+            // 2. Marking / Painting / Signage / Rubber removal
             if (/\b(MARKING|PAINT|PAINTING|SIGN|SIGNAGE|SURFACE MARKING|LINE WIP|RUBBER REMOVAL|RUBBER DEP|PAVEMENT MARKING)\b/.test(upper)) {
-                return { isShaded: true, reasonCategory: "MARKING", reasonText: "🎨 도색·표지·노면(Marking) 관련" };
-            }
-
-            // 2. Lighting (ALS, PAPI, RCLL, TWY LGT, etc.)
-            if (/\b(ALS|ALSF|MALSR|MALSF|SALS|SSALS|PAPI|VASI|RCLL|REDL|RTIL|TDZL|APPROACH LIGHT|TWY.*LGT|APRON.*LGT|OBST.*LGT|FLG LGT|STOP BAR.*TRIAL|ENTRY LGT.*U\/S|LGT U\/S)\b/.test(upper)) {
-                return { isShaded: true, reasonCategory: "LIGHTING", reasonText: "💡 등화(Lighting) 정비/시범운영" };
+                let detail = "유도로/계류장 노면 도색(Marking) 및 표지판 정비 작업 고시. 유도로/활주로 자체 폐쇄가 아닌 표면 도색 작업으로 정상 운항 가능하여 음영 처리함.";
+                if (upper.includes("RUBBER")) {
+                    detail = "활주로 고무질 제거(Rubber Removal) 작업 고시. 활주로 전면 폐쇄가 아닌 단기 노면 정비로 운항에 영향이 없어 음영 처리함.";
+                } else if (upper.includes("SIGN")) {
+                    detail = "안내 표지판(Signboard) 정비/교체 고시. 표준 차트 및 관제 지시에 따라 정상 지상 이동 가능하므로 음영 처리함.";
+                }
+                return { 
+                    isShaded: true, 
+                    reasonCategory: "MARKING", 
+                    reasonBadge: "🎨 표지·도색 (Marking)", 
+                    reasonDetail: detail 
+                };
             }
 
             // 3. Non-Flight Operating Time / Curfew
-            if (upper.includes("CURFEW") || upper.includes("1400-2100Z") || upper.includes("1400-2000Z") || upper.includes("TIL 0000 UTC") || upper.includes("BETWEEN 0100-0600")) {
-                return { isShaded: true, reasonCategory: "NON_FLIGHT_TIME", reasonText: "⏰ 비운항 시간대 고시 (Out of Flight Hours)" };
+            if (upper.includes("CURFEW") || upper.includes("1400-2100Z") || upper.includes("1400-2000Z") || upper.includes("TIL 0000 UTC") || upper.includes("BETWEEN 0100-0600") || upper.includes("DLY 0000-0800")) {
+                return { 
+                    isShaded: true, 
+                    reasonCategory: "NON_FLIGHT_TIME", 
+                    reasonBadge: "⏰ 비운항 시간대", 
+                    reasonDetail: "특정 일일 시간대(심야 커퓨 또는 일시 공사) 고시. 본 항공편의 운항/통과 예정 시간대와 일치하지 않는 비운항 시간대 고시로 음영 처리함." 
+                };
             }
 
             // 4. Non-Flight Route / Airway / VFR only / Small Acft
-            if (/\b(VFR ONLY|VFR TRANSITION|VFR ROUTE|BELOW 1000FT|TURBOPROP ONLY|SMALL ACFT ONLY|HELICOPTER ONLY|GA ONLY)\b/.test(upper)) {
-                return { isShaded: true, reasonCategory: "NON_FLIGHT_ROUTE", reasonText: "🛣️ 비운항 항로 및 시계비행(VFR) 전용" };
+            if (/\b(VFR ONLY|VFR TRANSITION|VFR ROUTE|BELOW 1000FT|TURBOPROP ONLY|SMALL ACFT ONLY|HELICOPTER ONLY|GA ONLY|LOW ALT)\b/.test(upper)) {
+                return { 
+                    isShaded: true, 
+                    reasonCategory: "NON_FLIGHT_ROUTE", 
+                    reasonBadge: "🛣️ 비운항항로/VFR", 
+                    reasonDetail: "저고도 시계비행(VFR) 전용 절차, 헬리콥터/경항공기 한정 고시, 또는 본 비행계획(FPL)에 포함되지 않은 비운항 항로 고시로 음영 처리함." 
+                };
             }
 
-            // 5. Trigger NOTAM / AIP SUP
+            // 5. Low Altitude Obstacle / Crane / Birds
+            if (/\b(CRANE|OBST|TOWER|BIRD|FLOCK|GRASS CUTTING|MOWING)\b/.test(upper) && !upper.includes("RWY 31R, TEMPORARY CRANE 4276FT")) {
+                return {
+                    isShaded: true,
+                    reasonCategory: "OBSTACLE_LOW",
+                    reasonBadge: "🏗️ 저고도 크레인/장애물",
+                    reasonDetail: "공항 인근 저고도 임시 기중기/장애물(100~250FT MSL) 또는 통상적 조류 주의보. 표준 SID/STAR 최저 안전고도(MEA/MOCA)에 영향을 주지 않아 음영 처리함."
+                };
+            }
+
+            // 6. Trigger NOTAM / AIP SUP
             if (/\b(TRIGGER NOTAM|AIP SUP|AIRAC)\b/.test(upper)) {
-                return { isShaded: true, reasonCategory: "TRIGGER", reasonText: "📋 AIP SUP / AIRAC 차트 기 반영" };
+                return { 
+                    isShaded: true, 
+                    reasonCategory: "TRIGGER", 
+                    reasonBadge: "📋 차트 기 반영 (AIP SUP)", 
+                    reasonDetail: "AIRAC 정기 AIP SUP 개정 사전 예고 고시 (Trigger NOTAM). FMC 항행 데이터베이스 및 최신 탑재 차트에 이미 반영 완료된 항목으로 음영 처리함." 
+                };
             }
 
-            return { isShaded: false, reasonCategory: "ACTIVE", reasonText: "🟢 일반 운항 고시" };
+            return { 
+                isShaded: false, 
+                reasonCategory: "ACTIVE", 
+                reasonBadge: "🟢 유효 운항 고시", 
+                reasonDetail: "비행 계획 경로 및 운항에 영향을 미칠 수 있는 활성 운항 고시입니다." 
+            };
         }
 
         /**
@@ -361,7 +414,8 @@
                     raw: rawBlock,
                     autoShaded: auto.isShaded,
                     reasonCategory: auto.reasonCategory,
-                    reasonText: auto.reasonText
+                    reasonBadge: auto.reasonBadge,
+                    reasonDetail: auto.reasonDetail
                 });
             }
 
@@ -1032,10 +1086,11 @@ E) TEMPORARY PROHIBITED AREA ESTABLISHED RADIUS 2NM CENTERED ON 373523N1265832E.
                 if (currentReasonFilter === 'MARKING' && item.reasonCategory !== 'MARKING') return false;
                 if (currentReasonFilter === 'NON_FLIGHT_TIME' && item.reasonCategory !== 'NON_FLIGHT_TIME') return false;
                 if (currentReasonFilter === 'NON_FLIGHT_ROUTE' && item.reasonCategory !== 'NON_FLIGHT_ROUTE') return false;
+                if (currentReasonFilter === 'OBSTACLE_LOW' && item.reasonCategory !== 'OBSTACLE_LOW') return false;
 
                 // Keyword search
                 if (searchKeyword) {
-                    const haystack = `${item.id} ${item.station} ${item.raw} ${item.reasonText}`.toLowerCase();
+                    const haystack = `${item.id} ${item.station} ${item.raw} ${item.reasonBadge} ${item.reasonDetail}`.toLowerCase();
                     if (!haystack.includes(searchKeyword)) return false;
                 }
 
@@ -1053,7 +1108,21 @@ E) TEMPORARY PROHIBITED AREA ESTABLISHED RADIUS 2NM CENTERED ON 373523N1265832E.
 
             container.innerHTML = filtered.map(item => {
                 const isShaded = isItemCurrentlyShaded(item);
+                const isManualOverride = (userShadingMap[item.id] !== undefined);
                 const shadedClass = isShaded ? 'shaded-item' : 'border-slate-800 bg-slate-950/90 shadow-md';
+
+                let displayBadge = item.reasonBadge;
+                let displayDetail = item.reasonDetail;
+
+                if (isManualOverride) {
+                    if (isShaded) {
+                        displayBadge = "👤 수동 음영 (Pilot Override)";
+                        displayDetail = "조종사 판단에 따라 수동으로 음영화(Manual Shaded) 처리된 항목입니다.";
+                    } else {
+                        displayBadge = "🟢 수동 유효 전환 (Pilot Override)";
+                        displayDetail = "조종사 판단에 따라 필수 확인 항목으로 수동 활성화(Manual Unshaded) 처리되었습니다.";
+                    }
+                }
 
                 return `
                     <div class="border rounded-xl p-4 transition duration-200 ${shadedClass}">
@@ -1063,12 +1132,12 @@ E) TEMPORARY PROHIBITED AREA ESTABLISHED RADIUS 2NM CENTERED ON 373523N1265832E.
                                 <span class="text-xs px-2 py-0.5 rounded bg-slate-800 text-slate-300 font-mono">[${item.station}]</span>
                                 
                                 ${isShaded ? `
-                                    <span class="text-[11px] px-2 py-0.5 rounded bg-slate-800 text-slate-400 border border-slate-700 font-mono">
-                                        ${item.reasonText}
+                                    <span class="text-[11px] px-2 py-0.5 rounded bg-slate-800/90 text-slate-300 border border-slate-700 font-mono font-medium">
+                                        ${displayBadge}
                                     </span>
                                 ` : `
-                                    <span class="text-[11px] px-2 py-0.5 rounded bg-emerald-950/80 border border-emerald-800/80 text-emerald-300 font-mono font-bold">
-                                        ${item.reasonText}
+                                    <span class="text-[11px] px-2 py-0.5 rounded bg-emerald-950/90 border border-emerald-800 text-emerald-300 font-mono font-bold">
+                                        ${displayBadge}
                                     </span>
                                 `}
                             </div>
@@ -1084,6 +1153,14 @@ E) TEMPORARY PROHIBITED AREA ESTABLISHED RADIUS 2NM CENTERED ON 373523N1265832E.
                                     ${isShaded ? '👁️ 음영 해제' : '🕶️ 음영화 (Shade)'}
                                 </button>
                             </div>
+                        </div>
+
+                        <!-- Shading Rationale / Operational Impact Description Banner -->
+                        <div class="mt-2.5 p-2.5 rounded-lg border text-xs font-mono flex items-start gap-2 ${isShaded ? 'bg-slate-900/90 border-slate-800 text-slate-300' : 'bg-emerald-950/30 border-emerald-800/50 text-emerald-200'}">
+                            <span class="px-1.5 py-0.5 rounded ${isShaded ? 'bg-slate-800 text-amber-300 font-bold border border-slate-700' : 'bg-emerald-900/80 text-emerald-200 font-bold border border-emerald-700'} text-[10px] shrink-0">
+                                ${isShaded ? '💡 음영 사유' : '🎯 운항 영향'}
+                            </span>
+                            <span class="leading-relaxed">${displayDetail}</span>
                         </div>
 
                         <!-- ICAO Raw Body -->
