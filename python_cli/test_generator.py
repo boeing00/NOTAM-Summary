@@ -1,0 +1,92 @@
+import sys
+if sys.stdout.encoding != 'utf-8':
+    sys.stdout.reconfigure(encoding='utf-8')
+
+def create_simple_pdf(text_lines, output_file):
+    # PDF stream building
+    content_stream = "BT /F1 10 Tf 50 750 Td 14 TL\n"
+    for line in text_lines:
+        escaped_line = line.replace("\\", "\\\\").replace("(", "\\(").replace(")", "\\)")
+        content_stream += f"({escaped_line}) '\n"
+    content_stream += "ET"
+
+    content_bytes = content_stream.encode("latin-1")
+    length = len(content_bytes)
+
+    pdf_template = f"""%PDF-1.4
+1 0 obj
+<< /Type /Catalog /Pages 2 0 R >>
+endobj
+2 0 obj
+<< /Type /Pages /Kids [3 0 R] /Count 1 >>
+endobj
+3 0 obj
+<< /Type /Page /Parent 2 0 R /MediaBox [0 0 612 792] /Resources 4 0 R /Contents 5 0 R >>
+endobj
+4 0 obj
+<< /Font << /F1 << /Type /Font /Subtype /Type1 /BaseFont /Helvetica >> >> >>
+endobj
+5 0 obj
+<< /Length {length} >>
+stream
+{content_stream}
+endstream
+endobj
+xref
+0 6
+0000000000 65535 f 
+0000000009 00000 n 
+0000000058 00000 n 
+0000000115 00000 n 
+0000000220 00000 n 
+0000000310 00000 n 
+trailer
+<< /Size 6 /Root 1 0 R >>
+startxref
+{400 + length}
+%%EOF"""
+
+    with open(output_file, "wb") as f:
+        f.write(pdf_template.encode("latin-1"))
+
+if __name__ == "__main__":
+    sample_text = [
+        "FLIGHT RELEASE & NOTAM PACKAGE (AAR202 RKSI-KLAX)",
+        "--------------------------------------------------",
+        "[DEP] RKSI / ICN / INCHEON INTL",
+        "10AUG26 00:00 - 31AUG26 23:59 RKSI A1024/26",
+        "E) RWY 15L/33R CLSD DUE TO WIP",
+        "",
+        "10AUG26 00:00 - 15SEP26 23:59 RKSI A1025/26",
+        "E) TWY M1, M2 BTN RWY 15L AND TWY R CLSD DUE TO PAVEMENT WORK",
+        "",
+        "10AUG26 01:00 - 30SEP26 12:00 RKSI A1028/26",
+        "E) ILS RWY 15R GP U/S DUE TO SCHEDULED MAINT",
+        "",
+        "01AUG26 00:00 - 31DEC26 23:59 RKSI A0912/26",
+        "E) OBST CRANE ERECTED AT 372832N 1262645E HGT 185FT AMSL LGTD",
+        "",
+        "01AUG26 00:00 - 31AUG26 23:59 RKSI A0800/26",
+        "E) TRIGGER NOTAM - AIP SUP 12/26 WEF 10AUG26 AIRAC AMDT",
+        "",
+        "[DEST] KLAX / LAX / LOS ANGELES INTL",
+        "09JUL26 12:00 - 30SEP26 23:59 KLAX A4510/26",
+        "E) RWY 07L/25R CLSD DAILY 0600-1400Z DUE TO LIGHTING MAINT",
+        "",
+        "12JUL26 08:00 - 15OCT26 23:59 KLAX A4522/26",
+        "E) RWY 24R PAPI U/S",
+        "",
+        "05JUL26 00:00 - 05AUG26 23:59 KLAX A4301/26",
+        "E) BIRD ACTIVITY INCREASED VICINITY OF RWY 25L/25R",
+        "",
+        "[ALTN] KSAN / SAN / SAN DIEGO INTL",
+        "01AUG26 00:00 - 31AUG26 23:59 KSAN A1102/26",
+        "E) TWY B CLSD BTN TWY C AND TWY D",
+        "",
+        "[ETP] PANC / ANC / TED STEVENS ANCHORAGE INTL",
+        "09JUL26 12:05 - 30SEP27 12:05 PANC A4415/26",
+        "E) RWY 15 PAPI U/S"
+    ]
+    
+    create_simple_pdf(sample_text, "sample_flight_notam.pdf")
+    print("✓ Created sample_flight_notam.pdf without external dependencies!")

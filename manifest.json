@@ -1,0 +1,16 @@
+{
+  "name": "NOTAM EFB Analyzer",
+  "short_name": "NOTAM EFB",
+  "start_url": "./index.html",
+  "display": "standalone",
+  "background_color": "#0a0f1d",
+  "theme_color": "#0f172a",
+  "orientation": "any",
+  "icons": [
+    {
+      "src": "https://cdn-icons-png.flaticon.com/512/7893/7893979.png",
+      "sizes": "512x512",
+      "type": "image/png"
+    }
+  ]
+}
