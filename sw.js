@@ -1,9 +1,9 @@
-const CACHE_NAME = 'notam-efb-v3';
+const CACHE_NAME = 'notam-efb-v5';
 const ASSETS = [
   './',
   './index.html',
-  './aar223_text.js?v=2.2',
-  './aar202_text.js?v=2.2',
+  './aar223_text.js?v=2.5',
+  './aar202_text.js?v=2.5',
   './manifest.json',
   'https://cdn.tailwindcss.com',
   'https://unpkg.com/lucide@latest',
@@ -30,15 +30,18 @@ self.addEventListener('activate', (e) => {
   );
 });
 
+// Network-First strategy for HTML and scripts to always get the latest code
 self.addEventListener('fetch', (e) => {
+  if (e.request.method !== 'GET') return;
+
   e.respondWith(
     fetch(e.request)
-      .then((res) => {
-        if (res && res.status === 200 && e.request.method === 'GET') {
-          const clone = res.clone();
-          caches.open(CACHE_NAME).then((c) => c.put(e.request, clone));
+      .then((networkRes) => {
+        if (networkRes && networkRes.status === 200) {
+          const clone = networkRes.clone();
+          caches.open(CACHE_NAME).then((cache) => cache.put(e.request, clone));
         }
-        return res;
+        return networkRes;
       })
       .catch(() => caches.match(e.request))
   );
