@@ -697,15 +697,41 @@
             return set;
         }
 
+        // [regex, Korean label, literal words to paint in the raw text]
         const LIMIT_PATTERNS = [
-            [/\bCLSD\b|\bCLOSED\b/, "폐쇄"],
-            [/\bU\/S\b|\bOUT OF SERVICE\b|\bOTS\b/, "운용불능"],
-            [/\bNOT AVBL\b|\bUNAVBL\b|\bNOT AVAILABLE\b/, "사용불가"],
-            [/\bPROHIBITED\b|\bFORBIDDEN\b/, "금지"],
-            [/\bSHALL\b|\bMUST\b|\bMANDATORY\b|\bREQ\b/, "의무사항"],
-            [/\bRESTRICTED\b|\bRESTRICTION\b|\bLIMITED TO\b/, "제한"],
-            [/\bWIP\b|\bWORK IN PROGRESS\b|\bCONSTRUCTION\b/, "공사"]
+            [/\bCLSD\b|\bCLOSED\b/, "폐쇄", ["CLSD", "CLOSED"]],
+            [/\bU\/S\b|\bOUT OF SERVICE\b|\bOTS\b/, "운용불능", ["U/S", "OUT OF SERVICE", "OTS"]],
+            [/\bNOT AVBL\b|\bUNAVBL\b|\bNOT AVAILABLE\b/, "사용불가", ["NOT AVAILABLE", "NOT AVBL", "UNAVBL"]],
+            [/\bPROHIBITED\b|\bFORBIDDEN\b/, "금지", ["PROHIBITED", "FORBIDDEN"]],
+            [/\bSHALL\b|\bMUST\b|\bMANDATORY\b|\bREQ\b/, "의무사항", ["MANDATORY", "SHALL", "MUST", "REQ"]],
+            [/\bRESTRICTED\b|\bRESTRICTION\b|\bLIMITED TO\b/, "제한", ["RESTRICTION", "RESTRICTED", "LIMITED TO"]],
+            [/\bWIP\b|\bWORK IN PROGRESS\b|\bCONSTRUCTION\b/, "공사", ["WORK IN PROGRESS", "CONSTRUCTION", "WIP"]]
         ];
+
+        /**
+         * Paints the matched bits inside the raw telex: route points amber,
+         * restriction wording rose. One pass over a combined pattern so an
+         * inserted span can never be re-scanned, longest phrase first so
+         * "NOT AVAILABLE" wins over "AVAILABLE".
+         */
+        function highlightRaw(raw, routeToks, limitWords) {
+            const esc = String(raw || "")
+                .replace(/&/g, "&amp;").replace(/</g, "&lt;").replace(/>/g, "&gt;");
+            const all = [];
+            routeToks.forEach((t) => all.push([t, "route"]));
+            limitWords.forEach((w) => all.push([w, "limit"]));
+            if (!all.length) return esc;
+
+            all.sort((a, b) => b[0].length - a[0].length);
+            const kind = {};
+            all.forEach(([t, k]) => { if (!(t in kind)) kind[t] = k; });
+            const alt = all.map(([t]) => t.replace(/[.*+?^${}()|[\\]\\\\]/g, "\\\\$&")).join("|");
+
+            return esc.replace(new RegExp("(?:" + alt + ")", "g"), (m) =>
+                kind[m] === "limit"
+                    ? '<span class="bg-rose-500/25 text-rose-200 rounded px-0.5">' + m + '</span>'
+                    : '<span class="bg-amber-500/25 text-amber-200 rounded px-0.5">' + m + '</span>');
+        }
 
         /**
          * Cross-checks one NOTAM against the flight. Returns evidence, never a
@@ -738,19 +764,58 @@
             // 5-letter fixes, airways and lat/long points are strong evidence.
             // 3-letter navaids are reported separately: they collide with plain
             // English too easily to be treated the same way.
+            //
+            // Line numbers are kept so a card can quote its source line. A fix
+            // named inside a route *definition* and a restriction sitting in a
+            // different clause are not the same thing, and only the line shows it.
+            const lines = body.split(/\r?\n/);
+            const lineOf = (tok) => {
+                const re = new RegExp("\\b" + tok + "\\b");
+                for (let i = 0; i < lines.length; i += 1) if (re.test(lines[i])) return i;
+                return -1;
+            };
+
             const strong = [];
             const weak = [];
-            const hit = (tok) => new RegExp("\\b" + tok + "\\b").test(body);
-            ctx.route.fixes.forEach((t) => { if (hit(t)) strong.push(t); });
-            ctx.route.airways.forEach((t) => { if (hit(t)) strong.push(t); });
-            ctx.route.points.forEach((t) => { if (hit(t)) strong.push(t); });
-            ctx.route.navaids.forEach((t) => { if (hit(t)) weak.push(t); });
+            const routeLines = new Set();
+            const collect = (set, bucket, keepLine) => {
+                set.forEach((t) => {
+                    const i = lineOf(t);
+                    if (i < 0) return;
+                    bucket.push(t);
+                    if (keepLine) routeLines.add(i);
+                });
+            };
+            collect(ctx.route.fixes, strong, true);
+            collect(ctx.route.airways, strong, true);
+            collect(ctx.route.points, strong, true);
+            collect(ctx.route.navaids, weak, false);
 
             // --- LIMIT ------------------------------------------------------
             const limits = [];
-            for (const [re, label] of LIMIT_PATTERNS) {
-                if (re.test(body)) limits.push(label);
+            const limitLines = new Set();
+            const limitWords = [];
+            for (const [re, label, words] of LIMIT_PATTERNS) {
+                let found = -1;
+                for (let i = 0; i < lines.length; i += 1) {
+                    if (re.test(lines[i])) { found = i; break; }
+                }
+                if (found < 0 && re.test(body)) found = 0;   // single-line telex
+                if (found < 0) continue;
+                limits.push(label);
+                limitLines.add(found);
+                words.forEach((w) => { if (body.includes(w)) limitWords.push(w); });
             }
+
+            const clip = (i) => (lines[i] || "").trim().replace(/\s+/g, " ").slice(0, 160);
+            const routeQuotes = Array.from(routeLines).sort((a, b) => a - b).slice(0, 2).map(clip);
+            const limitQuotes = Array.from(limitLines).sort((a, b) => a - b).slice(0, 2).map(clip);
+
+            // Both present but never on the same line: the restriction is most
+            // likely aimed at something other than our route. This is a pointer
+            // for the person reading it, not a conclusion.
+            const separated = routeLines.size > 0 && limitLines.size > 0 &&
+                Array.from(routeLines).every((i) => !limitLines.has(i));
 
             const firMatch = ctx.firs.has(item.station);
             const inWindow = timeState !== "OUTSIDE";
@@ -771,6 +836,10 @@
                 routeHits: strong,
                 navaidHits: weak,
                 limits,
+                limitWords,
+                routeQuotes,
+                limitQuotes,
+                separated,
                 routeRelated,
                 airportRelated,
                 relevant: routeRelated || airportRelated,
@@ -1434,22 +1503,35 @@ E) NAV ILS RWY 26R CAT II/III NA`
                         <div class="space-y-2.5">
                             ${xc.rows.map((r) => {
                                 const why = [];
+                                const q = (arr) => (arr && arr.length)
+                                    ? arr.map((l) => `<div class="mt-1 font-mono text-[11px] text-slate-400 bg-slate-900 border-l-2 border-slate-700 pl-2 py-1 break-words">${l.replace(/&/g, "&amp;").replace(/</g, "&lt;").replace(/>/g, "&gt;")}</div>`).join('')
+                                    : '';
+
                                 why.push(r.result.timeState === "OVERLAP"
-                                    ? `유효기간 <span class="text-slate-300">${r.item.valid}</span> — 비행창과 겹침`
-                                    : `유효기간 <span class="text-slate-300">${r.item.valid}</span> — 시간 판단 불가`);
+                                    ? `\uc720\ud6a8\uae30\uac04 <span class="text-slate-300">${r.item.valid}</span> \u2014 \ube44\ud589\ucc3d\uacfc \uacb9\uce68`
+                                    : `\uc720\ud6a8\uae30\uac04 <span class="text-slate-300">${r.item.valid}</span> \u2014 \uc2dc\uac04 \ud310\ub2e8 \ubd88\uac00`);
+
                                 if (r.result.firMatch) {
-                                    why.push(`통과 FIR <span class="text-slate-300">${r.item.station}</span>에서 발행 (18항 EET/)`);
+                                    why.push(`\ud1b5\uacfc FIR <span class="text-slate-300">${r.item.station}</span>\uc5d0\uc11c \ubc1c\ud589 (18\ud56d EET/)`);
                                 }
                                 if (r.result.routeHits.length) {
-                                    why.push(`15항 항로의 <span class="text-slate-300">${r.result.routeHits.join(', ')}</span> 언급`);
+                                    why.push(`15\ud56d \ud56d\ub85c\uc758 <span class="text-amber-300">${r.result.routeHits.join(', ')}</span> \uc5b8\uae09`
+                                        + q(r.result.routeQuotes));
                                 }
                                 if (r.result.navaidHits.length) {
-                                    why.push(`<span class="text-slate-500">참고 — 항법시설 ${r.result.navaidHits.join(', ')} 일치 (약한 근거, 판정에는 미반영)</span>`);
+                                    why.push(`<span class="text-slate-500">\ucc38\uace0 \u2014 \ud56d\ubc95\uc2dc\uc124 ${r.result.navaidHits.join(', ')} \uc77c\uce58 (\uc57d\ud55c \uadfc\uac70, \ud310\uc815\uc5d0\ub294 \ubbf8\ubc18\uc601)</span>`);
                                 }
-                                why.push(`제한 표현 <span class="text-rose-300">${r.result.limits.join(', ')}</span> 포함`);
+                                why.push(`\uc81c\ud55c \ud45c\ud604 <span class="text-rose-300">${r.result.limits.join(', ')}</span> \ud3ec\ud568`
+                                    + q(r.result.limitQuotes));
 
-                                const raw = String(r.item.raw || "")
-                                    .replace(/&/g, "&amp;").replace(/</g, "&lt;").replace(/>/g, "&gt;");
+                                // The restriction and the route mention never share a
+                                // line. Say so - it is usually the difference between
+                                // "this binds me" and "this defines someone else's track".
+                                if (r.result.separated) {
+                                    why.push(`<span class="text-amber-200">\u26a0 \ud56d\ub85c \uc77c\uce58 \uc904\uacfc \uc81c\ud55c \ud45c\ud604 \uc904\uc774 \uc11c\ub85c \ub2e4\ub985\ub2c8\ub2e4 \u2014 \uc81c\ud55c \ub300\uc0c1\uc774 \ub0b4 \ud56d\ub85c\uac00 \uc544\ub2d0 \uc218 \uc788\uc2b5\ub2c8\ub2e4. \uc6d0\ubb38\uc744 \ud655\uc778\ud558\uc2ed\uc2dc\uc624.</span>`);
+                                }
+
+                                const raw = highlightRaw(r.item.raw, r.result.routeHits, r.result.limitWords);
 
                                 return `
                                 <div class="bg-slate-950/70 border border-slate-800 rounded-xl p-3.5 space-y-2.5">
