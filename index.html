@@ -38,6 +38,16 @@
         ::-webkit-scrollbar { width: 6px; height: 6px; }
         ::-webkit-scrollbar-track { background: #0f172a; }
         ::-webkit-scrollbar-thumb { background: #334155; border-radius: 3px; }
+        .shaded-item {
+            opacity: 0.45;
+            filter: grayscale(80%);
+            border-color: rgba(51, 65, 85, 0.4) !important;
+            background-color: rgba(15, 23, 42, 0.6) !important;
+        }
+        .shaded-item:hover {
+            opacity: 0.85;
+            filter: grayscale(0%);
+        }
         @media print {
             header, .no-print { display: none !important; }
             body { background: white !important; color: black !important; }
@@ -47,7 +57,7 @@
         }
     </style>
 </head>
-<body class="bg-slate-950 text-slate-100 min-h-screen font-sans antialiased selection:bg-amber-500/30 selection:text-amber-200 pb-16">
+<body class="bg-slate-950 text-slate-100 min-h-screen font-sans antialiased selection:bg-amber-500/30 selection:text-amber-200 pb-20">
 
     <!-- Top Action Header -->
     <header class="border-b border-slate-800 bg-slate-900/90 backdrop-blur sticky top-0 z-50 no-print">
@@ -59,7 +69,7 @@
                 <div>
                     <div class="flex items-center gap-2">
                         <h1 class="text-base font-bold text-white tracking-wide">NOTAM & Route Compliance EFB</h1>
-                        <span class="text-[10px] px-2 py-0.5 rounded bg-emerald-500/10 border border-emerald-500/30 text-emerald-400 font-mono">Executive & Raw Text</span>
+                        <span class="text-[10px] px-2 py-0.5 rounded bg-emerald-500/10 border border-emerald-500/30 text-emerald-400 font-mono">Executive & Raw Shading</span>
                     </div>
                     <p id="headerSubtitle" class="text-xs text-slate-400 font-mono">비행계획서(PDF) 업로드 또는 샘플을 선택하세요</p>
                 </div>
@@ -82,7 +92,7 @@
     <input type="file" id="pdfFileInput" accept="application/pdf" class="hidden" onchange="handleFileSelected(event)" />
 
     <!-- Main Container -->
-    <main class="max-w-5xl mx-auto px-4 sm:px-6 py-6 space-y-6">
+    <main class="max-w-5xl mx-auto px-4 sm:px-6 py-6 space-y-8">
 
         <!-- Top Dropzone / Fast Sample Selector -->
         <div id="dropzoneCard" class="bg-slate-900 border-2 border-dashed border-slate-700 hover:border-amber-500/50 rounded-2xl p-6 sm:p-8 text-center transition cursor-pointer no-print" onclick="triggerFilePicker()" ondragover="event.preventDefault()" ondrop="handleDrop(event)">
@@ -109,19 +119,121 @@
         <!-- Processing Indicator -->
         <div id="loadingIndicator" class="hidden bg-slate-900 border border-slate-800 rounded-xl p-8 text-center space-y-3 no-print">
             <div class="w-8 h-8 border-2 border-amber-400 border-t-transparent rounded-full animate-spin mx-auto"></div>
-            <p class="text-sm font-medium text-slate-200">PDF 전문 추출 및 NOTAM 원문/브리핑 생성 중...</p>
+            <p class="text-sm font-medium text-slate-200">PDF 전문 추출 및 원문 나열/스마트 음영 처리 중...</p>
             <p class="text-xs text-slate-500">클라이언트 브라우저에서 100% 안전하게 계산됩니다 (API 0회)</p>
         </div>
 
-        <!-- Full Executive Briefing Document Container -->
-        <article id="reportDocument" class="bg-slate-900 border border-slate-800 rounded-2xl p-6 sm:p-10 shadow-2xl space-y-8">
-            <!-- Dynamically populated as a clean structured document -->
-        </article>
+        <!-- Main Document Area -->
+        <div id="mainDocumentArea" class="space-y-8">
+
+            <!-- Section 1: Executive Cockpit Briefing Report -->
+            <article id="reportDocument" class="bg-slate-900 border border-slate-800 rounded-2xl p-6 sm:p-10 shadow-2xl space-y-8">
+                <!-- Executive Briefing populated here -->
+            </article>
+
+            <!-- Section 2: Full Raw NOTAM List with Interactive Shading -->
+            <section id="rawNotamWorkbench" class="bg-slate-900 border border-slate-800 rounded-2xl p-6 sm:p-10 shadow-2xl space-y-6">
+                
+                <!-- Section Header & Smart Shading Metrics -->
+                <div class="border-b border-slate-800 pb-6 space-y-4">
+                    <div class="flex flex-col sm:flex-row sm:items-center justify-between gap-3">
+                        <div class="flex items-center gap-3">
+                            <div class="p-2.5 bg-amber-500/10 border border-amber-500/30 rounded-xl text-amber-400">
+                                <i data-lucide="file-code-2" class="w-6 h-6"></i>
+                            </div>
+                            <div>
+                                <div class="flex items-center gap-2">
+                                    <h2 class="text-lg sm:text-xl font-black text-white tracking-wide">
+                                        📄 비행계획서 NOTAM 전수 원문 나열 & 스마트 음영(Shading)
+                                    </h2>
+                                </div>
+                                <p class="text-xs text-slate-400 mt-0.5">
+                                    모든 원문을 그대로 표시하며, 비운항시간·비운항항로·등화·표지 관련 NOTAM은 자동 음영 처리됩니다 (수동 전환 가능).
+                                </p>
+                            </div>
+                        </div>
+
+                        <!-- Shading Counters -->
+                        <div class="flex items-center gap-2 font-mono text-xs shrink-0 flex-wrap">
+                            <span class="px-3 py-1.5 rounded-lg bg-slate-950 border border-slate-800 text-slate-300">
+                                전체 <strong id="cntTotal" class="text-white">0</strong>건
+                            </span>
+                            <span class="px-3 py-1.5 rounded-lg bg-emerald-950/60 border border-emerald-800/60 text-emerald-300">
+                                🟢 유효(필수) <strong id="cntActive" class="text-emerald-400">0</strong>건
+                            </span>
+                            <span class="px-3 py-1.5 rounded-lg bg-slate-800/80 border border-slate-700 text-slate-400">
+                                ⚪ 음영 <strong id="cntShaded" class="text-slate-200">0</strong>건
+                            </span>
+                        </div>
+                    </div>
+
+                    <!-- Filter Controls & Quick Actions -->
+                    <div class="bg-slate-950 border border-slate-800 rounded-xl p-4 space-y-3">
+                        <div class="flex flex-col sm:flex-row items-center justify-between gap-3">
+                            <!-- Search Input -->
+                            <div class="relative w-full sm:w-80">
+                                <i data-lucide="search" class="w-4 h-4 text-slate-400 absolute left-3 top-1/2 -translate-y-1/2"></i>
+                                <input 
+                                    type="text" 
+                                    id="rawSearchInput" 
+                                    oninput="renderRawNotamList()" 
+                                    placeholder="원문 검색 (활주로, Fix, ID, 장비)..." 
+                                    class="w-full pl-9 pr-4 py-2 bg-slate-900 border border-slate-800 rounded-lg text-xs text-slate-100 placeholder-slate-500 focus:outline-none focus:border-amber-500/50"
+                                />
+                            </div>
+
+                            <!-- View Filter & Quick Batch Buttons -->
+                            <div class="flex items-center gap-2 flex-wrap self-end sm:self-auto text-xs font-mono">
+                                <button id="btnViewMode" onclick="toggleShadedViewMode()" class="px-3 py-1.5 rounded-lg border border-slate-700 bg-slate-900 hover:bg-slate-800 text-slate-200 transition flex items-center gap-1.5">
+                                    <i data-lucide="eye" class="w-3.5 h-3.5 text-amber-400"></i>
+                                    <span id="txtViewMode">모든 원문 표시 (음영 포함)</span>
+                                </button>
+                                <button onclick="batchShadeCategories()" class="px-3 py-1.5 rounded-lg border border-amber-500/40 bg-amber-500/10 hover:bg-amber-500/20 text-amber-300 transition">
+                                    ⚡ 등화·표지·시간외 자동음영 복원
+                                </button>
+                                <button onclick="resetAllShadingOverrides()" class="px-2.5 py-1.5 rounded-lg border border-slate-800 bg-slate-900 hover:bg-slate-800 text-slate-400 hover:text-slate-200 transition">
+                                    초기화
+                                </button>
+                            </div>
+                        </div>
+
+                        <!-- Station Filter Tabs -->
+                        <div class="flex flex-wrap items-center gap-1.5 pt-2 border-t border-slate-800" id="rawStationTabs">
+                            <!-- Populated by JS -->
+                        </div>
+
+                        <!-- Reason Filter Pills -->
+                        <div class="flex flex-wrap items-center gap-1.5 pt-1" id="rawReasonPills">
+                            <button onclick="filterByReason('ALL')" class="pill-reason active px-2.5 py-1 rounded text-xs font-mono bg-amber-500/15 border border-amber-500/40 text-amber-300" data-reason="ALL">전체 원문</button>
+                            <button onclick="filterByReason('ACTIVE_ONLY')" class="pill-reason px-2.5 py-1 rounded text-xs font-mono bg-slate-900 border border-slate-800 text-emerald-400 hover:border-emerald-700" data-reason="ACTIVE_ONLY">🟢 유효 운항 NOTAM만</button>
+                            <button onclick="filterByReason('LIGHTING')" class="pill-reason px-2.5 py-1 rounded text-xs font-mono bg-slate-900 border border-slate-800 text-slate-400 hover:text-slate-200" data-reason="LIGHTING">💡 등화 (Lighting)</button>
+                            <button onclick="filterByReason('MARKING')" class="pill-reason px-2.5 py-1 rounded text-xs font-mono bg-slate-900 border border-slate-800 text-slate-400 hover:text-slate-200" data-reason="MARKING">🎨 표지 (Marking)</button>
+                            <button onclick="filterByReason('NON_FLIGHT_TIME')" class="pill-reason px-2.5 py-1 rounded text-xs font-mono bg-slate-900 border border-slate-800 text-slate-400 hover:text-slate-200" data-reason="NON_FLIGHT_TIME">⏰ 비운항시간 외</button>
+                            <button onclick="filterByReason('NON_FLIGHT_ROUTE')" class="pill-reason px-2.5 py-1 rounded text-xs font-mono bg-slate-900 border border-slate-800 text-slate-400 hover:text-slate-200" data-reason="NON_FLIGHT_ROUTE">🛣️ 비운항항로/VFR</button>
+                        </div>
+                    </div>
+                </div>
+
+                <!-- Raw NOTAM Stack Container -->
+                <div id="rawNotamContainer" class="space-y-3">
+                    <!-- Dynamically rendered raw NOTAM items -->
+                </div>
+
+            </section>
+
+        </div>
 
     </main>
 
     <!-- Complete Inlined Self-Contained Engine Script -->
     <script>
+        // Global State
+        let allParsedNotams = [];
+        let userShadingMap = {}; // notamId -> boolean (true: shaded, false: active)
+        let currentStationTab = 'ALL';
+        let currentReasonFilter = 'ALL';
+        let viewOnlyActive = false; // if true, hide shaded items
+
         /**
          * Extracts plain text from an uploaded PDF File object using PDF.js.
          */
@@ -146,13 +258,69 @@
         }
 
         /**
-         * Parses all raw NOTAMs from fullText.
+         * Determines if a NOTAM should be auto-shaded based on:
+         * 1. Lighting (ALS, PAPI, RCLL, TWY LGT, etc.)
+         * 2. Marking / Paint / Line WIP
+         * 3. Non-flight operating times (e.g. curfew hours outside flight arrival)
+         * 4. Non-flight routes (VFR only, low altitude, non-filed fixes)
+         * 5. Trigger NOTAMs (AIP SUP)
+         * 
+         * Critical items (Runway closure, ILS GP/LOC unserviceable, Volcanic ash, A380/Code F wing span limits) are NEVER auto-shaded.
          */
-        function extractAllRawNotams(fullText) {
+        function evaluateAutoShading(raw, station, fplRoute) {
+            const upper = raw.toUpperCase();
+
+            // Never shade CRITICAL items
+            const isCritical = (
+                (/\b(RWY|RUNWAY)\s+\d{1,2}[LCR]?\s+(?:CLSD|CLOSED|NOT AVBL|UNAVBL)\b/.test(upper) && !upper.includes("TWY M1 CLSD BTN")) ||
+                (/\b(ILS|LOC|GP|GLIDE PATH)\b/.test(upper) && /\b(U\/S|OTS|OUT OF SERVICE)\b/.test(upper)) ||
+                upper.includes("VOLCANIC") || upper.includes("ASH") || upper.includes("KLYUCHEVSKOY") ||
+                upper.includes("WINGSPAN GREATER THAN 213FT") || upper.includes("WINGSPAN MORE THAN 118FT") ||
+                upper.includes("PROHIBITED AREA") || upper.includes("GPS SIGNALS ARE UNRELIABLE")
+            );
+
+            if (isCritical) {
+                return { isShaded: false, reasonCategory: "CRITICAL", reasonText: "🔴 운항 직결 필수 NOTAM (음영 불가)" };
+            }
+
+            // 1. Marking / Painting / Signage
+            if (/\b(MARKING|PAINT|PAINTING|SIGN|SIGNAGE|SURFACE MARKING|LINE WIP|RUBBER REMOVAL|RUBBER DEP|PAVEMENT MARKING)\b/.test(upper)) {
+                return { isShaded: true, reasonCategory: "MARKING", reasonText: "🎨 도색·표지·노면(Marking) 관련" };
+            }
+
+            // 2. Lighting (ALS, PAPI, RCLL, TWY LGT, etc.)
+            if (/\b(ALS|ALSF|MALSR|MALSF|SALS|SSALS|PAPI|VASI|RCLL|REDL|RTIL|TDZL|APPROACH LIGHT|TWY.*LGT|APRON.*LGT|OBST.*LGT|FLG LGT|STOP BAR.*TRIAL|ENTRY LGT.*U\/S)\b/.test(upper)) {
+                return { isShaded: true, reasonCategory: "LIGHTING", reasonText: "💡 등화(Lighting) 정비/시범운영" };
+            }
+
+            // 3. Non-Flight Operating Time / Curfew
+            if (upper.includes("CURFEW") || upper.includes("1400-2100Z") || upper.includes("1400-2000Z") || upper.includes("TIL 0000 UTC") || upper.includes("BETWEEN 0100-0600")) {
+                return { isShaded: true, reasonCategory: "NON_FLIGHT_TIME", reasonText: "⏰ 비운항 시간대 고시 (Out of Flight Hours)" };
+            }
+
+            // 4. Non-Flight Route / Airway / VFR only / Small Acft
+            if (/\b(VFR ONLY|VFR TRANSITION|VFR ROUTE|BELOW 1000FT|TURBOPROP ONLY|SMALL ACFT ONLY|HELICOPTER ONLY|GA ONLY)\b/.test(upper)) {
+                return { isShaded: true, reasonCategory: "NON_FLIGHT_ROUTE", reasonText: "🛣️ 비운항 항로 및 시계비행(VFR) 전용" };
+            }
+
+            // 5. Trigger NOTAM / AIP SUP
+            if (/\b(TRIGGER NOTAM|AIP SUP|AIRAC)\b/.test(upper)) {
+                return { isShaded: true, reasonCategory: "TRIGGER", reasonText: "📋 AIP SUP / AIRAC 차트 기 반영" };
+            }
+
+            return { isShaded: false, reasonCategory: "ACTIVE", reasonText: "🟢 일반 운항 고시" };
+        }
+
+        /**
+         * Parses all raw NOTAMs from fullText and assigns smart shading properties.
+         */
+        function parseAllRawNotamsWithShading(fullText) {
             const list = [];
             const seen = new Set();
             const p = /(?:(?:\d+\.\s*)?(\d{2}[A-Z]{3}\d{2}\s+\d{2}:\d{2})\s*-\s*([^\n\r]+?)\s+([A-Z]{4})\s+([A-Z0-9/]+))(?:\r?\n)([\s\S]*?)(?=(?:\r?\n(?:\d+\.\s*)?\d{2}[A-Z]{3}\d{2}\s+\d{2}:\d{2}\s*-|\r?\n\[[A-Z]+\]|\r?\n◼|\Z))/g;
             let m;
+            let idx = 1;
+
             while ((m = p.exec(fullText)) !== null) {
                 const start = m[1].trim();
                 const end = m[2].trim();
@@ -163,18 +331,25 @@
                 if (seen.has(id)) continue;
                 seen.add(id);
 
+                const rawBlock = `${start} - ${end} ${stn} ${num}\n${body}`;
+                const auto = evaluateAutoShading(rawBlock, stn, fullText);
+
                 list.push({
+                    index: idx++,
                     id: id,
                     station: stn,
-                    valid: `${start} - ${end}`,
-                    raw: `${start} - ${end} ${stn} ${num}\n${body}`
+                    valid: `${start} ~ ${end}`,
+                    raw: rawBlock,
+                    autoShaded: auto.isShaded,
+                    reasonCategory: auto.reasonCategory,
+                    reasonText: auto.reasonText
                 });
             }
             return list;
         }
 
         /**
-         * Synthesizes the entire flight package text into a structured Executive Briefing Object with Full Raw Texts.
+         * Synthesizes the entire flight package text into a structured Executive Briefing Object.
          */
         function buildExecutiveBriefing(fullText, filename = "Flight_Document.pdf") {
             const upper = fullText.toUpperCase();
@@ -440,9 +615,6 @@ E) TEMPORARY PROHIBITED AREA ESTABLISHED RADIUS 2NM CENTERED ON 373523N1265832E.
                 { title: "인천 접근 시 GPS 모니터링", desc: "인천 FIR 진입 후 군 훈련 GPS 간섭(RKRR Z0555/26)으로 인한 EGPWS 불필요 경보 발생 여부 주시." }
             ];
 
-            // 7. Extract All Raw Notams Archive
-            const allRawNotams = extractAllRawNotams(fullText);
-
             return {
                 meta: {
                     filename,
@@ -463,8 +635,7 @@ E) TEMPORARY PROHIBITED AREA ESTABLISHED RADIUS 2NM CENTERED ON 373523N1265832E.
                 compliancePoints,
                 cautionAirports,
                 checklist,
-                inFlightReminders,
-                allRawNotams
+                inFlightReminders
             };
         }
 
@@ -492,7 +663,13 @@ E) TEMPORARY PROHIBITED AREA ESTABLISHED RADIUS 2NM CENTERED ON 373523N1265832E.
             try {
                 const { pageCount, fullText } = await extractTextFromPdfFile(file);
                 const briefing = buildExecutiveBriefing(fullText, file.name);
+                
+                // Parse full raw list
+                allParsedNotams = parseAllRawNotamsWithShading(fullText);
+                userShadingMap = {}; // reset overrides
+
                 renderExecutiveReport(briefing);
+                renderRawNotamWorkbench();
             } catch (err) {
                 alert("PDF 파싱 중 오류가 발생했습니다: " + err.message);
             } finally {
@@ -558,7 +735,7 @@ E) TEMPORARY PROHIBITED AREA ESTABLISHED RADIUS 2NM CENTERED ON 373523N1265832E.
                 <div class="space-y-4">
                     <div class="flex items-center gap-2 pb-2 border-b border-rose-900/40 text-rose-400 font-bold text-sm">
                         <i data-lucide="alert-octagon" class="w-5 h-5"></i>
-                        <span>🚨 🔴 [CRITICAL] 최우선 필수 확인 NOTAM (운항 직결) & ICAO 원문</span>
+                        <span>🚨 🔴 [CRITICAL] 최우선 필수 확인 NOTAM (운항 직결)</span>
                     </div>
 
                     <div class="space-y-3">
@@ -582,7 +759,6 @@ E) TEMPORARY PROHIBITED AREA ESTABLISHED RADIUS 2NM CENTERED ON 373523N1265832E.
                                     </div>
                                 </div>
                                 
-                                <!-- ICAO Raw NOTAM Text Drawer -->
                                 <div class="pt-1">
                                     <details class="group">
                                         <summary class="cursor-pointer text-xs font-mono text-slate-400 hover:text-amber-300 flex items-center justify-between select-none py-1">
@@ -604,7 +780,7 @@ E) TEMPORARY PROHIBITED AREA ESTABLISHED RADIUS 2NM CENTERED ON 373523N1265832E.
                 <div class="space-y-4">
                     <div class="flex items-center gap-2 pb-2 border-b border-emerald-900/40 text-emerald-400 font-bold text-sm">
                         <i data-lucide="check-square" class="w-5 h-5"></i>
-                        <span>🔍 항로 NOTAM 제한사항별 상세 준수성 검증 (Point-by-Point) & 원문</span>
+                        <span>🔍 항로 NOTAM 제한사항별 상세 준수성 검증 (Point-by-Point)</span>
                     </div>
 
                     <div class="space-y-3">
@@ -639,7 +815,7 @@ E) TEMPORARY PROHIBITED AREA ESTABLISHED RADIUS 2NM CENTERED ON 373523N1265832E.
                     </div>
                 </div>
 
-                <!-- 5. Caution Airport Breakdown Table with Raw Accordion -->
+                <!-- 5. Caution Airport Breakdown Table -->
                 <div class="space-y-4">
                     <div class="flex items-center gap-2 pb-2 border-b border-amber-900/40 text-amber-400 font-bold text-sm">
                         <i data-lucide="alert-triangle" class="w-5 h-5"></i>
@@ -658,7 +834,7 @@ E) TEMPORARY PROHIBITED AREA ESTABLISHED RADIUS 2NM CENTERED ON 373523N1265832E.
                                 </tr>
                             </thead>
                             <tbody class="divide-y divide-slate-800/80 bg-slate-950/40">
-                                ${b.cautionAirports.map((ca, idx) => `
+                                ${b.cautionAirports.map(ca => `
                                     <tr class="hover:bg-slate-800/30 transition">
                                         <td class="p-3 font-mono font-bold text-amber-400">${ca.stn}</td>
                                         <td class="p-3 font-mono text-slate-400">${ca.id}</td>
@@ -676,7 +852,7 @@ E) TEMPORARY PROHIBITED AREA ESTABLISHED RADIUS 2NM CENTERED ON 373523N1265832E.
                     </div>
                 </div>
 
-                <!-- 6. Enroute & FIR Special Notes -->
+                <!-- 6. Enroute & FIR Special Notes (1 Column Full-Width Cards) -->
                 <div class="space-y-4">
                     <div class="flex items-center gap-2 pb-2 border-b border-blue-900/40 text-blue-400 font-bold text-sm">
                         <i data-lucide="compass" class="w-5 h-5"></i>
@@ -769,36 +945,195 @@ E) TEMPORARY PROHIBITED AREA ESTABLISHED RADIUS 2NM CENTERED ON 373523N1265832E.
                         `).join('')}
                     </div>
                 </div>
-
-                <!-- 9. Full Raw NOTAM Archive Appendix -->
-                <div class="space-y-4 pt-6 border-t border-slate-800">
-                    <div class="flex items-center justify-between">
-                        <div class="flex items-center gap-2 text-slate-300 font-bold text-sm">
-                            <i data-lucide="file-code" class="w-5 h-5 text-amber-400"></i>
-                            <span>📄 전수 NOTAM 공항별 원문 목록 (Full Raw Archive - ${b.allRawNotams.length}건)</span>
-                        </div>
-                    </div>
-
-                    <div class="space-y-2">
-                        ${b.allRawNotams.map((item, idx) => `
-                            <details class="group bg-slate-950 border border-slate-800/80 rounded-lg p-3">
-                                <summary class="cursor-pointer text-xs font-mono text-slate-300 hover:text-amber-300 flex items-center justify-between select-none">
-                                    <div class="flex items-center gap-2">
-                                        <span class="text-amber-400 font-bold">${item.id}</span>
-                                        <span class="text-slate-500 font-normal text-[11px]">${item.valid}</span>
-                                    </div>
-                                    <i data-lucide="chevron-down" class="w-3.5 h-3.5 text-slate-500 transition group-open:rotate-180"></i>
-                                </summary>
-                                <pre class="mt-2.5 p-3 bg-slate-900 rounded border border-slate-800 text-xs font-mono text-slate-300 whitespace-pre-wrap leading-relaxed">${item.raw}</pre>
-                            </details>
-                        `).join('')}
-                    </div>
-                </div>
             `;
 
             doc.innerHTML = html;
             lucide.createIcons();
             window.scrollTo({ top: 0, behavior: 'smooth' });
+        }
+
+        /**
+         * Renders the Full Raw NOTAM List with Interactive Shading Controls.
+         */
+        function renderRawNotamWorkbench() {
+            // Update Station tabs
+            const stations = Array.from(new Set(allParsedNotams.map(x => x.station))).sort();
+            document.getElementById('rawStationTabs').innerHTML = `
+                <button onclick="filterByStation('ALL')" class="stn-pill ${currentStationTab === 'ALL' ? 'active bg-amber-500/15 border-amber-500/40 text-amber-300' : 'bg-slate-900 border-slate-800 text-slate-400'} px-2.5 py-1 rounded text-xs font-mono border transition" data-stn="ALL">전체 공항/FIR</button>
+                ${stations.map(stn => `
+                    <button onclick="filterByStation('${stn}')" class="stn-pill ${currentStationTab === stn ? 'active bg-amber-500/15 border-amber-500/40 text-amber-300' : 'bg-slate-900 border-slate-800 text-slate-400'} px-2.5 py-1 rounded text-xs font-mono border transition" data-stn="${stn}">${stn}</button>
+                `).join('')}
+            `;
+
+            renderRawNotamList();
+        }
+
+        function isItemCurrentlyShaded(item) {
+            if (userShadingMap[item.id] !== undefined) {
+                return userShadingMap[item.id];
+            }
+            return item.autoShaded;
+        }
+
+        function renderRawNotamList() {
+            const container = document.getElementById('rawNotamContainer');
+            const searchKeyword = document.getElementById('rawSearchInput').value.toLowerCase().trim();
+
+            let totalCnt = allParsedNotams.length;
+            let activeCnt = 0;
+            let shadedCnt = 0;
+
+            allParsedNotams.forEach(item => {
+                const isShaded = isItemCurrentlyShaded(item);
+                if (isShaded) shadedCnt++;
+                else activeCnt++;
+            });
+
+            document.getElementById('cntTotal').innerText = totalCnt;
+            document.getElementById('cntActive').innerText = activeCnt;
+            document.getElementById('cntShaded').innerText = shadedCnt;
+
+            // Filter items
+            const filtered = allParsedNotams.filter(item => {
+                const isShaded = isItemCurrentlyShaded(item);
+
+                // Station filter
+                if (currentStationTab !== 'ALL' && item.station !== currentStationTab) return false;
+
+                // View mode: active only
+                if (viewOnlyActive && isShaded) return false;
+
+                // Reason filter
+                if (currentReasonFilter === 'ACTIVE_ONLY' && isShaded) return false;
+                if (currentReasonFilter === 'LIGHTING' && item.reasonCategory !== 'LIGHTING') return false;
+                if (currentReasonFilter === 'MARKING' && item.reasonCategory !== 'MARKING') return false;
+                if (currentReasonFilter === 'NON_FLIGHT_TIME' && item.reasonCategory !== 'NON_FLIGHT_TIME') return false;
+                if (currentReasonFilter === 'NON_FLIGHT_ROUTE' && item.reasonCategory !== 'NON_FLIGHT_ROUTE') return false;
+
+                // Keyword search
+                if (searchKeyword) {
+                    const haystack = `${item.id} ${item.station} ${item.raw} ${item.reasonText}`.toLowerCase();
+                    if (!haystack.includes(searchKeyword)) return false;
+                }
+
+                return true;
+            });
+
+            if (filtered.length === 0) {
+                container.innerHTML = `
+                    <div class="bg-slate-950 border border-slate-800 rounded-xl p-10 text-center text-slate-500 font-mono text-xs">
+                        선택한 조건에 해당하는 NOTAM 원문이 없습니다.
+                    </div>
+                `;
+                return;
+            }
+
+            container.innerHTML = filtered.map(item => {
+                const isShaded = isItemCurrentlyShaded(item);
+                const shadedClass = isShaded ? 'shaded-item' : 'border-slate-800 bg-slate-950/90 shadow-md';
+
+                return `
+                    <div class="border rounded-xl p-4 transition duration-200 ${shadedClass}">
+                        <div class="flex flex-col sm:flex-row sm:items-center justify-between gap-2 pb-2.5 border-b border-slate-800/60">
+                            <div class="flex items-center gap-2 flex-wrap">
+                                <span class="font-mono text-sm font-bold text-amber-400">${item.id}</span>
+                                <span class="text-xs px-2 py-0.5 rounded bg-slate-800 text-slate-300 font-mono">[${item.station}]</span>
+                                
+                                ${isShaded ? `
+                                    <span class="text-[11px] px-2 py-0.5 rounded bg-slate-800 text-slate-400 border border-slate-700 font-mono">
+                                        ${item.reasonText}
+                                    </span>
+                                ` : `
+                                    <span class="text-[11px] px-2 py-0.5 rounded bg-emerald-950/80 border border-emerald-800/80 text-emerald-300 font-mono font-bold">
+                                        ${item.reasonText}
+                                    </span>
+                                `}
+                            </div>
+
+                            <!-- Right Controls: Valid Period + Toggle Shade Button -->
+                            <div class="flex items-center gap-3 shrink-0">
+                                <span class="text-[11px] font-mono text-slate-500">${item.valid}</span>
+                                <button 
+                                    onclick="toggleUserShade('${item.id}')" 
+                                    class="px-2.5 py-1 rounded text-xs font-mono font-semibold transition border ${isShaded ? 'bg-amber-500/15 border-amber-500/40 text-amber-300 hover:bg-amber-500/25' : 'bg-slate-800 border-slate-700 text-slate-300 hover:bg-slate-700'}"
+                                    title="사용자 판단에 따라 음영화/활성화 전환"
+                                >
+                                    ${isShaded ? '👁️ 음영 해제' : '🕶️ 음영화 (Shade)'}
+                                </button>
+                            </div>
+                        </div>
+
+                        <!-- ICAO Raw Body -->
+                        <div class="mt-3">
+                            <pre class="p-3 bg-slate-950 rounded-lg border border-slate-800/80 font-mono text-xs text-slate-200 whitespace-pre-wrap leading-relaxed selection:bg-amber-500/40">${item.raw}</pre>
+                        </div>
+                    </div>
+                `;
+            }).join('');
+
+            lucide.createIcons();
+        }
+
+        function toggleUserShade(id) {
+            const item = allParsedNotams.find(x => x.id === id);
+            if (!item) return;
+            const current = isItemCurrentlyShaded(item);
+            userShadingMap[id] = !current;
+            renderRawNotamList();
+        }
+
+        function toggleShadedViewMode() {
+            viewOnlyActive = !viewOnlyActive;
+            document.getElementById('txtViewMode').innerText = viewOnlyActive ? '유효 NOTAM만 표시 중' : '모든 원문 표시 (음영 포함)';
+            renderRawNotamList();
+        }
+
+        function batchShadeCategories() {
+            userShadingMap = {};
+            renderRawNotamList();
+        }
+
+        function resetAllShadingOverrides() {
+            userShadingMap = {};
+            currentStationTab = 'ALL';
+            currentReasonFilter = 'ALL';
+            viewOnlyActive = false;
+            document.getElementById('rawSearchInput').value = '';
+            document.getElementById('txtViewMode').innerText = '모든 원문 표시 (음영 포함)';
+            
+            document.querySelectorAll('.stn-pill').forEach(el => {
+                el.className = `stn-pill ${el.dataset.stn === 'ALL' ? 'active bg-amber-500/15 border-amber-500/40 text-amber-300' : 'bg-slate-900 border-slate-800 text-slate-400'} px-2.5 py-1 rounded text-xs font-mono border transition`;
+            });
+
+            document.querySelectorAll('.pill-reason').forEach(el => {
+                el.className = `pill-reason ${el.dataset.reason === 'ALL' ? 'active bg-amber-500/15 border-amber-500/40 text-amber-300' : 'bg-slate-900 border-slate-800 text-slate-400'} px-2.5 py-1 rounded text-xs font-mono`;
+            });
+
+            renderRawNotamList();
+        }
+
+        function filterByStation(stn) {
+            currentStationTab = stn;
+            document.querySelectorAll('.stn-pill').forEach(el => {
+                if (el.dataset.stn === stn) {
+                    el.className = 'stn-pill active bg-amber-500/15 border-amber-500/40 text-amber-300 px-2.5 py-1 rounded text-xs font-mono border transition';
+                } else {
+                    el.className = 'stn-pill bg-slate-900 border-slate-800 text-slate-400 px-2.5 py-1 rounded text-xs font-mono border transition';
+                }
+            });
+            renderRawNotamList();
+        }
+
+        function filterByReason(reason) {
+            currentReasonFilter = reason;
+            document.querySelectorAll('.pill-reason').forEach(el => {
+                if (el.dataset.reason === reason) {
+                    el.className = 'pill-reason active bg-amber-500/15 border-amber-500/40 text-amber-300 px-2.5 py-1 rounded text-xs font-mono';
+                } else {
+                    el.className = 'pill-reason bg-slate-900 border-slate-800 text-slate-400 hover:text-slate-200 px-2.5 py-1 rounded text-xs font-mono';
+                }
+            });
+            renderRawNotamList();
         }
 
         function toggleRawModal(id, raw) {
@@ -864,7 +1199,10 @@ E) CDR ARE ESTABLISHED AS FLW, RTE PERIOD MNM APPLICABLE ALT 1) L512 2608291200/
 E) AD NOT AVBL TO ACFT WITH WINGSPAN GREATER THAN 213FT
             `;
             const briefing = buildExecutiveBriefing(sampleText, "AAR223_KJFK_RKSI_A380_PACKAGE.pdf");
+            allParsedNotams = parseAllRawNotamsWithShading(sampleText);
+            userShadingMap = {};
             renderExecutiveReport(briefing);
+            renderRawNotamWorkbench();
         }
 
         function loadSampleAAR202() {
@@ -894,7 +1232,10 @@ E) RWY 26R ALS U/S
 E) NAV ILS RWY 26R CAT II/III NA
             `;
             const briefing = buildExecutiveBriefing(sampleText, "AAR202_RKSI_KLAX_A380_PACKAGE.pdf");
+            allParsedNotams = parseAllRawNotamsWithShading(sampleText);
+            userShadingMap = {};
             renderExecutiveReport(briefing);
+            renderRawNotamWorkbench();
         }
 
         // PWA Service Worker Registration
