@@ -1431,30 +1431,53 @@ E) NAV ILS RWY 26R CAT II/III NA`
                         </p>
 
                         ${xc.rows.length ? `
-                        <div class="overflow-x-auto border border-slate-800 rounded-xl">
-                            <table class="w-full text-left text-xs font-mono min-w-[640px]">
-                                <thead class="bg-slate-950 text-slate-500">
-                                    <tr>
-                                        <th class="p-2.5">NOTAM</th>
-                                        <th class="p-2.5">공항</th>
-                                        <th class="p-2.5">근거</th>
-                                        <th class="p-2.5">제한 표현</th>
-                                        <th class="p-2.5">유효기간</th>
-                                    </tr>
-                                </thead>
-                                <tbody class="divide-y divide-slate-800/70">
-                                    ${xc.rows.map((r) => `
-                                        <tr class="hover:bg-slate-800/30">
-                                            <td class="p-2.5 text-amber-300 whitespace-nowrap">${r.item.id}</td>
-                                            <td class="p-2.5 text-slate-300">${r.result.stationMatch ? `<span class="text-emerald-300">${r.item.station}</span>` : r.item.station}</td>
-                                            <td class="p-2.5 text-slate-300">${r.result.routeHits.length
-                                                ? r.result.routeHits.slice(0, 5).join(', ')
-                                                : '<span class="text-slate-400">통과 FIR</span>'}</td>
-                                            <td class="p-2.5 text-rose-300">${r.result.limits.join(', ')}</td>
-                                            <td class="p-2.5 text-slate-500 whitespace-nowrap">${r.item.valid}</td>
-                                        </tr>`).join('')}
-                                </tbody>
-                            </table>
+                        <div class="space-y-2.5">
+                            ${xc.rows.map((r) => {
+                                const why = [];
+                                why.push(r.result.timeState === "OVERLAP"
+                                    ? `유효기간 <span class="text-slate-300">${r.item.valid}</span> — 비행창과 겹침`
+                                    : `유효기간 <span class="text-slate-300">${r.item.valid}</span> — 시간 판단 불가`);
+                                if (r.result.firMatch) {
+                                    why.push(`통과 FIR <span class="text-slate-300">${r.item.station}</span>에서 발행 (18항 EET/)`);
+                                }
+                                if (r.result.routeHits.length) {
+                                    why.push(`15항 항로의 <span class="text-slate-300">${r.result.routeHits.join(', ')}</span> 언급`);
+                                }
+                                if (r.result.navaidHits.length) {
+                                    why.push(`<span class="text-slate-500">참고 — 항법시설 ${r.result.navaidHits.join(', ')} 일치 (약한 근거, 판정에는 미반영)</span>`);
+                                }
+                                why.push(`제한 표현 <span class="text-rose-300">${r.result.limits.join(', ')}</span> 포함`);
+
+                                const raw = String(r.item.raw || "")
+                                    .replace(/&/g, "&amp;").replace(/</g, "&lt;").replace(/>/g, "&gt;");
+
+                                return `
+                                <div class="bg-slate-950/70 border border-slate-800 rounded-xl p-3.5 space-y-2.5">
+                                    <div class="flex flex-wrap items-center gap-2">
+                                        <span class="font-mono text-sm font-bold text-amber-300">${r.item.id}</span>
+                                        <span class="text-[10px] font-mono px-1.5 py-0.5 rounded border ${r.result.firMatch ? 'bg-amber-500/10 border-amber-500/40 text-amber-300' : 'bg-slate-800 border-slate-700 text-slate-300'}">${r.result.firMatch ? '통과 FIR 공역' : '항로 지점 일치'}</span>
+                                        <span class="text-[11px] font-mono text-slate-500 ml-auto">${r.item.station}</span>
+                                    </div>
+
+                                    <div class="bg-slate-900/70 border border-slate-800 rounded-lg p-2.5">
+                                        <span class="text-[10px] font-mono font-bold text-slate-500 uppercase tracking-wider block mb-1.5">교차 대조 결과</span>
+                                        <ul class="space-y-1 text-xs text-slate-400 leading-relaxed">
+                                            ${why.map((w) => `<li class="flex gap-1.5"><span class="text-slate-600">·</span><span>${w}</span></li>`).join('')}
+                                        </ul>
+                                    </div>
+
+                                    <details class="group">
+                                        <summary class="cursor-pointer text-xs font-mono text-slate-400 hover:text-amber-300 flex items-center justify-between gap-2 py-1">
+                                            <span class="flex items-center gap-1.5 font-bold">
+                                                <i data-lucide="terminal" class="w-3.5 h-3.5 text-slate-500"></i>
+                                                <span>NOTAM 원문 (Raw ICAO Text)</span>
+                                            </span>
+                                            <i data-lucide="chevron-down" class="w-3.5 h-3.5 text-slate-500 transition group-open:rotate-180"></i>
+                                        </summary>
+                                        <pre class="mt-2 p-3 bg-slate-900 border border-slate-800 rounded-lg font-mono text-[11px] text-slate-300 whitespace-pre-wrap break-words leading-relaxed">${raw}</pre>
+                                    </details>
+                                </div>`;
+                            }).join('')}
                         </div>
                         ${xc.review > xc.rows.length ? `<p class="text-[11px] text-slate-500">상위 ${xc.rows.length}건만 표시됩니다. 전체는 아래 NOTAM 목록에서 확인하십시오.</p>` : ''}
                         ` : `<p class="text-xs text-slate-400">비행 시간대·통과 공역·제한 표현이 모두 걹치는 항로 NOTAM은 없습니다. 공항 NOTAM은 위 집계와 공항별 탭을 확인하십시오.</p>`}
