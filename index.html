@@ -815,8 +815,15 @@
             const len = gcNm(A, B) / NM_PER_RAD;
             if (len === 0) return gcNm(A, P);
             const d13 = gcNm(A, P) / NM_PER_RAD;
-            const xt = Math.asin(Math.sin(d13) * Math.sin(bearing(A, P) - bearing(A, B)));
-            const along = Math.acos(Math.max(-1, Math.min(1, Math.cos(d13) / Math.cos(xt))));
+            const delta = bearing(A, P) - bearing(A, B);
+            const xt = Math.asin(Math.sin(d13) * Math.sin(delta));
+            // acos returns [0, PI], so along-track has to be signed by hand.
+            // Without this a point BEHIND A falls through to the cross-track
+            // term, which measures the great circle extended the whole way
+            // round the earth - it reported a corner 515NM behind the leg as
+            // 65NM off track.
+            let along = Math.acos(Math.max(-1, Math.min(1, Math.cos(d13) / Math.cos(xt))));
+            if (Math.cos(delta) < 0) along = -along;
             if (along < 0) return gcNm(A, P);
             if (along > len) return gcNm(B, P);
             return Math.abs(xt) * NM_PER_RAD;
@@ -831,6 +838,145 @@
                 min = Math.min(min, segNm(pts[i], pts[i + 1], P));
             }
             return min;
+        }
+
+        /**
+         * Longitudes in one continuous frame centred on `lon0`. Every leg here
+         * crosses the antimeridian, so comparing a route point at 170E against
+         * a shape at 152W in raw degrees puts them 322 apart instead of 38.
+         */
+        function shiftLon(lon, lon0) {
+            let d = lon - lon0;
+            while (d > 180) d -= 360;
+            while (d < -180) d += 360;
+            return d;
+        }
+
+        /** Ray casting in the shifted frame. */
+        function pointInPolygon(pt, poly, lon0) {
+            const x = shiftLon(pt.lon, lon0), y = pt.lat;
+            let inside = false;
+            for (let i = 0, j = poly.length - 1; i < poly.length; j = i, i += 1) {
+                const xi = shiftLon(poly[i].lon, lon0), yi = poly[i].lat;
+                const xj = shiftLon(poly[j].lon, lon0), yj = poly[j].lat;
+                if ((yi > y) !== (yj > y) &&
+                    x < ((xj - xi) * (y - yi)) / (yj - yi) + xi) {
+                    inside = !inside;
+                }
+            }
+            return inside;
+        }
+
+        /** Do segments A-B and C-D cross? Proper crossings only. */
+        function segCross(A, Bp, C, D, lon0) {
+            const sx = (p) => shiftLon(p.lon, lon0);
+            const side = (px, py, qx, qy, rx, ry) =>
+                (qx - px) * (ry - py) - (qy - py) * (rx - px);
+            const ax = sx(A), ay = A.lat, bx = sx(Bp), by = Bp.lat;
+            const cx = sx(C), cy = C.lat, dx = sx(D), dy = D.lat;
+            const d1 = side(cx, cy, dx, dy, ax, ay);
+            const d2 = side(cx, cy, dx, dy, bx, by);
+            const d3 = side(ax, ay, bx, by, cx, cy);
+            const d4 = side(ax, ay, bx, by, dx, dy);
+            return ((d1 > 0) !== (d2 > 0)) && ((d3 > 0) !== (d4 > 0));
+        }
+
+        /**
+         * "MUST NOT FLT PLAN THROUGH THE AIRSPACE DEFINED AS <coords>".
+         * Only the coordinate run that follows the cue is taken - a NOTAM like
+         * A2472/26 carries several unrelated coordinate groups, and sweeping
+         * them all into one polygon would invent a shape nobody published.
+         */
+        function extractProhibitedAreas(raw) {
+            const up = String(raw || "").toUpperCase();
+            const COORD = "(?:\\d{6}[NS]\\d{7}[EW]|\\d{4}[NS]\\d{5}[EW])";
+            const cue = /(?:MUST NOT|SHALL NOT|DO NOT)\s+(?:FLT|FLIGHT)?\s*PLAN(?:NED)?(?:\s+THROUGH)?/g;
+            const out = [];
+            let m;
+            while ((m = cue.exec(up)) !== null) {
+                const tail = up.slice(m.index, m.index + 700);
+                const cRe = new RegExp("\\b" + COORD + "\\b", "g");
+                const run = [];
+                let c, last = -1;
+                while ((c = cRe.exec(tail)) !== null) {
+                    // A coordinate far past the previous one belongs to another
+                    // clause, not to this shape.
+                    if (last >= 0 && c.index - last > 60) break;
+                    last = c.index + c[0].length;
+                    const p = decodeLatLon(c[0]);
+                    if (p) run.push(p);
+                }
+                if (run.length >= 3) out.push({ cue: m[0].trim(), points: run });
+            }
+            return out;
+        }
+
+        /**
+         * "BTN <coord> AND <coord>" - a gate line an entry or exit must be made
+         * over. Whether the route crosses that line is arithmetic; whether the
+         * crossing is the FIR boundary crossing is not, because the boundary
+         * itself is nowhere in the document.
+         */
+        function extractGateSegments(raw) {
+            const up = String(raw || "").toUpperCase();
+            const COORD = "(\\d{6}[NS]\\d{7}[EW]|\\d{4}[NS]\\d{5}[EW])";
+            const re = new RegExp("\\bB(?:TN|ETWEEN)\\s+" + COORD + "\\s+AND\\s+" + COORD + "\\b", "g");
+            const out = [];
+            let m;
+            while ((m = re.exec(up)) !== null) {
+                const a = decodeLatLon(m[1]), b = decodeLatLon(m[2]);
+                if (a && b) out.push({ a, b });
+            }
+            return out;
+        }
+
+        /**
+         * Prohibited boxes and gate lines, resolved against the filed route.
+         * Separate from geoCheck: that one asks how close we pass, this one
+         * asks whether we go in, which is what a prohibition turns on.
+         */
+        function zoneCheck(raw, routePts) {
+            const banned = extractProhibitedAreas(raw);
+            const gates = extractGateSegments(raw);
+            if (!banned.length && !gates.length) return null;
+            if (routePts.length < 2) return null;
+
+            const crossesShape = (poly, lon0) => {
+                for (let i = 0; i < routePts.length - 1; i += 1) {
+                    for (let j = 0; j < poly.length; j += 1) {
+                        const k = (j + 1) % poly.length;
+                        if (segCross(routePts[i], routePts[i + 1], poly[j], poly[k], lon0)) return true;
+                    }
+                }
+                return false;
+            };
+
+            const bannedOut = banned.map((z) => {
+                const lon0 = z.points[0].lon;
+                const inside = routePts.some((p) => pointInPolygon(p, z.points, lon0));
+                let nearest = Infinity;
+                z.points.forEach((p) => { nearest = Math.min(nearest, polylineNm(routePts, p)); });
+                return {
+                    cue: z.cue,
+                    points: z.points,
+                    corners: z.points.length,
+                    entered: inside || crossesShape(z.points, lon0),
+                    nearestNm: nearest === Infinity ? null : nearest
+                };
+            });
+
+            const gateOut = gates.map((g) => {
+                const lon0 = g.a.lon;
+                let crosses = false;
+                for (let i = 0; i < routePts.length - 1 && !crosses; i += 1) {
+                    if (segCross(routePts[i], routePts[i + 1], g.a, g.b, lon0)) crosses = true;
+                }
+                let nearest = Math.min(polylineNm(routePts, g.a), polylineNm(routePts, g.b));
+                routePts.forEach((p) => { nearest = Math.min(nearest, segNm(g.a, g.b, p)); });
+                return { a: g.a, b: g.b, crosses, nearestNm: nearest };
+            });
+
+            return { banned: bannedOut, gates: gateOut };
         }
 
         /**
@@ -852,10 +998,30 @@
                 }
             }
 
-            const all = up.match(coordRe) || [];
-            const pts = all.map(decodeLatLon).filter(Boolean);
-            if (pts.length >= 3) return { kind: "polygon", points: pts };
-            if (pts.length >= 1) return { kind: "points", points: pts };
+            // Coordinates scattered across separate clauses are not one shape.
+            // A2472/26 states a gate line in one sentence and a prohibited box
+            // in the next; sweeping every coordinate together drew a six-corner
+            // polygon nobody published. Only a contiguous run is a shape.
+            // Vertices of one shape are joined by TO / AND / THENCE and nothing
+            // else. Anything else in the gap - "(MUST NOT FLT PLAN THROUGH THE
+            // AIRSPACE DEFINED AS" - starts a new clause, so a distance
+            // threshold is the wrong test: that gap is only 51 characters.
+            const JOINER = /^[\s,.\-]*(?:TO|AND|THENCE)?[\s,.\-]*$/;
+            const runs = [];
+            let cur = [], last = -1, c;
+            coordRe.lastIndex = 0;
+            while ((c = coordRe.exec(up)) !== null) {
+                if (last >= 0 && !JOINER.test(up.slice(last, c.index))) {
+                    runs.push(cur); cur = [];
+                }
+                last = c.index + c[0].length;
+                const p = decodeLatLon(c[0]);
+                if (p) cur.push(p);
+            }
+            if (cur.length) runs.push(cur);
+            const best = runs.sort((a, b) => b.length - a.length)[0] || [];
+            if (best.length >= 3) return { kind: "polygon", points: best };
+            if (best.length >= 1) return { kind: "points", points: best };
             return null;
         }
 
@@ -1206,7 +1372,15 @@
             // are arithmetic, not reading comprehension.
             const area = extractGeoArea(raw);
             if (area) area.vert = parseVerticalBand(raw);
-            const geo = geoCheck(area, ctx.route.pointList, ctx.levels);
+            let geo = geoCheck(area, ctx.route.pointList, ctx.levels);
+            const zones = zoneCheck(raw, ctx.route.pointList);
+            // A prohibition states its own box. Showing the generic distance
+            // block for the identical shape says the same thing twice.
+            const samePts = (a, b) => a.length === b.length &&
+                a.every((p, i) => p.lat === b[i].lat && p.lon === b[i].lon);
+            const dupZone = !!(zones && area && area.points &&
+                zones.banned.some((z) => samePts(z.points, area.points)));
+            if (dupZone) geo = null;
             const inWindow = timeState !== "OUTSIDE";
             // En route = the airspace we fly through, or a NOTAM that names a
             // point we filed. Airport NOTAMs are the other bucket.
@@ -1246,7 +1420,8 @@
                 navaidHits: weak,
                 limits,
                 limitWords,
-                area,
+                area: dupZone ? null : area,
+                zones,
                 geo,
                 firContext,
                 namedOurs: fixes.mine,
@@ -2030,6 +2205,27 @@ E) NAV ILS RWY 26R CAT II/III NA`
                                     why.push(`<span class="text-slate-300">\uae30\ud558 \uacc4\uc0b0</span> \u2014 ${where}`
                                         + `<div class="mt-1">${lat}</div>${vert}`
                                         + `<div class="mt-1 text-[11px] text-slate-500">\ud56d\ub85c\ub294 15\ud56d \uc704\uacbd\ub3c4 \uc9c0\uc810 ${xc.routePointCount}\uac1c\ub97c \uc774\uc740 \uadfc\uc0ac\uc120\uc785\ub2c8\ub2e4. \uba85\uba85 \uc9c0\uc810\uc740 \ubb38\uc11c\uc5d0 \uc88c\ud45c\uac00 \uc5c6\uc2b5\ub2c8\ub2e4.</div>`);
+                                }
+
+                                // A prohibition and a gate line have no grey band -
+                                // the route is inside or it is not, it crosses or it
+                                // does not - so these are stated flatly.
+                                const z = r.result.zones;
+                                if (z) {
+                                    const ll = (p) => `${Math.abs(p.lat).toFixed(1)}°${p.lat < 0 ? 'S' : 'N'} ${Math.abs(p.lon).toFixed(1)}°${p.lon < 0 ? 'W' : 'E'}`;
+                                    z.banned.forEach((bz) => {
+                                        why.push(`<span class="text-slate-300">금지 공역</span> — 좌표 ${bz.corners}개로 정의된 구역`
+                                            + `<div class="mt-1">${bz.entered
+                                                ? '<span class="text-rose-300">계획 항로가 이 구역을 통과합니다</span>'
+                                                : `<span class="text-emerald-300">통과하지 않습니다</span> — 최근접 ${Math.round(bz.nearestNm).toLocaleString()} NM`}</div>`);
+                                    });
+                                    z.gates.forEach((gt) => {
+                                        why.push(`<span class="text-slate-300">좌표 구간선</span> — ${ll(gt.a)} ~ ${ll(gt.b)}`
+                                            + `<div class="mt-1">${gt.crosses
+                                                ? '<span class="text-emerald-300">계획 항로가 이 선을 교차합니다</span>'
+                                                : `<span class="text-amber-300">교차하지 않습니다</span> — 최근접 ${Math.round(gt.nearestNm).toLocaleString()} NM`}</div>`
+                                            + `<div class="mt-1 text-[11px] text-slate-500">FIR 경계는 문서에 없습니다. 이 교차가 해당 FIR의 진입/이탈점인지는 판정하지 않습니다.</div>`);
+                                    });
                                 }
 
                                 // The restriction and the route mention never share a
