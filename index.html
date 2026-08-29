@@ -19,8 +19,8 @@
     <!-- PDF.js CDN (Mozilla) -->
     <script src="https://cdnjs.cloudflare.com/ajax/libs/pdf.js/3.11.174/pdf.min.js"></script>
     <!-- Pre-bundled Full Flight Datasets for Instant Preview -->
-    <script src="./aar223_text.js?v=2.3"></script>
-    <script src="./aar202_text.js?v=2.3"></script>
+    <script src="./aar223_text.js?v=2.4"></script>
+    <script src="./aar202_text.js?v=2.4"></script>
 
     <script>
         pdfjsLib.GlobalWorkerOptions.workerSrc = 'https://cdnjs.cloudflare.com/ajax/libs/pdf.js/3.11.174/pdf.worker.min.js';
@@ -43,10 +43,10 @@
         ::-webkit-scrollbar-track { background: #0f172a; }
         ::-webkit-scrollbar-thumb { background: #334155; border-radius: 3px; }
         .shaded-item {
-            opacity: 0.5;
-            filter: grayscale(70%);
+            opacity: 0.52;
+            filter: grayscale(65%);
             border-color: rgba(51, 65, 85, 0.5) !important;
-            background-color: rgba(15, 23, 42, 0.7) !important;
+            background-color: rgba(15, 23, 42, 0.75) !important;
         }
         .shaded-item:hover {
             opacity: 0.95;
@@ -123,7 +123,7 @@
         <!-- Processing Indicator -->
         <div id="loadingIndicator" class="hidden bg-slate-900 border border-slate-800 rounded-xl p-8 text-center space-y-3 no-print">
             <div class="w-8 h-8 border-2 border-amber-400 border-t-transparent rounded-full animate-spin mx-auto"></div>
-            <p class="text-sm font-medium text-slate-200">PDF 전문 추출 및 전수 원문 나열/음영 이유 분석 중...</p>
+            <p class="text-sm font-medium text-slate-200">PDF 전문 추출 및 전수 원문 나열/한글 요약 분석 중...</p>
             <p class="text-xs text-slate-500">클라이언트 브라우저에서 100% 안전하게 계산됩니다 (API 0회)</p>
         </div>
 
@@ -135,7 +135,7 @@
                 <!-- Executive Briefing populated here -->
             </article>
 
-            <!-- Section 2: Full Raw NOTAM List with Interactive Shading & Reason Descriptions -->
+            <!-- Section 2: Full Raw NOTAM List with Interactive Shading & Korean Explanations -->
             <section id="rawNotamWorkbench" class="bg-slate-900 border border-slate-800 rounded-2xl p-6 sm:p-10 shadow-2xl space-y-6">
                 
                 <!-- Section Header & Smart Shading Metrics -->
@@ -148,11 +148,11 @@
                             <div>
                                 <div class="flex items-center gap-2">
                                     <h2 class="text-lg sm:text-xl font-black text-white tracking-wide">
-                                        📄 비행계획서 NOTAM 전수 원문 나열 & 음영 이유 상세 기술
+                                        📄 비행계획서 NOTAM 전수 원문 나열 & 한글 요약 해설
                                     </h2>
                                 </div>
                                 <p class="text-xs text-slate-400 mt-0.5">
-                                    비행계획서 내 모든 원문을 그대로 표시하며, 음영 처리된 모든 항목에는 <strong>음영 처리 이유 및 운항 미영향 사유가 상세 기술</strong>됩니다.
+                                    비행계획서 내 모든 NOTAM 원문을 그대로 표시하며, <strong>각 NOTAM별 간단한 한글 요약 해설 및 음영 이유</strong>가 함께 제공됩니다.
                                 </p>
                             </div>
                         </div>
@@ -181,7 +181,7 @@
                                     type="text" 
                                     id="rawSearchInput" 
                                     oninput="renderRawNotamList()" 
-                                    placeholder="원문 검색 (활주로, Fix, ID, 장비)..." 
+                                    placeholder="원문 검색 (활주로, Fix, ID, 장비, 한글)..." 
                                     class="w-full pl-9 pr-4 py-2 bg-slate-900 border border-slate-800 rounded-lg text-xs text-slate-100 placeholder-slate-500 focus:outline-none focus:border-amber-500/50"
                                 />
                             </div>
@@ -221,7 +221,7 @@
 
                 <!-- Raw NOTAM Stack Container -->
                 <div id="rawNotamContainer" class="space-y-3">
-                    <!-- Dynamically rendered raw NOTAM items with detailed reasons -->
+                    <!-- Dynamically rendered raw NOTAM items with detailed reasons & Korean explanations -->
                 </div>
 
             </section>
@@ -369,6 +369,150 @@
         }
 
         /**
+         * Generates a concise, plain-language Korean translation and operational explanation for ANY NOTAM.
+         */
+        function generateKoreanExplanation(raw, station) {
+            const u = raw.toUpperCase();
+
+            // 1. Company Advisories (COAD)
+            if (u.includes("COAD01/21") || (u.includes("CURFEW") && u.includes("1400-2100Z"))) {
+                return "김포공항(RKSS) 심야 커퓨(Curfew, 매일 1400~2100Z) 설정 고시. 해당 시간대 착륙 및 이륙이 전면 통제됩니다.";
+            }
+            if (u.includes("COAD05/26") || u.includes("EARLY TURN BELOW 400FT")) {
+                return "인천공항(RKSI) NDB 절차 개정에 따라 이륙 및 복행 시 400FT AGL 이하 조기 선회가 엄격히 금지됩니다 (FOM 6.4.4 준수).";
+            }
+            if (u.includes("COAD")) {
+                return `${station} 사내 운항 통보(Company Advisory) 고시. 공항 및 절차별 사내 권고사항 및 유의절차를 준수하십시오.`;
+            }
+
+            // 2. Runway Specific Closures & Restrictions
+            if (u.includes("RWY 04R/22L CLSD")) {
+                return "뉴욕 JFK 공항 활주로 04R/22L 전면 폐쇄 고시 (공사/정비로 인한 이륙 및 착륙 불가).";
+            }
+            if (u.includes("RWY 04L/22R CLSD")) {
+                return "뉴욕 JFK 공항 활주로 04L/22R 전면 폐쇄 고시 (교차 활주로 동시 폐쇄로 이륙 활주로 31L/13R 집중 및 지상 대기 지연 예상).";
+            }
+            if (u.includes("RWY 14L/32R CLSD")) {
+                return "김포공항(RKSS) 활주로 14L/32R 심야 공사(1400-2000Z) 폐쇄 고시 (회항 착륙 시 14R/32L 단일 활주로 착륙).";
+            }
+            if (u.includes("RWY 15L/33R CLSD")) {
+                return "인천공항(RKSI) 활주로 15L/33R 노면 포장 보수 공사로 인한 전면 폐쇄 고시.";
+            }
+            if (u.includes("RWY 07L/25R CLSD")) {
+                return "로스앤젤레스(KLAX) 북측 주 활주로 07L/25R 포장 보수 공사로 인한 전면 폐쇄 고시.";
+            }
+            
+            const mRwyClsd = u.match(/\b(?:RWY|RUNWAY)\s+(\d{1,2}[LCR]?(?:\/\d{1,2}[LCR]?)?)\s+(?:CLSD|CLOSED|NOT AVBL)/);
+            if (mRwyClsd) {
+                return `${station} 활주로 RWY ${mRwyClsd[1]} 전면 폐쇄 고시 (공사 및 정비로 인한 이착륙 불가).`;
+            }
+
+            // 3. Wingspan & Code limits (A380 / Code F)
+            if (u.includes("AD NOT AVBL TO ACFT WITH WINGSPAN GREATER THAN 213FT")) {
+                return "몬트리올(CYUL) 날개폭 213FT(65m) 초과 항공기(A380/Code F) 이용 전면 금지 (비상 회항 불가).";
+            }
+            if (u.includes("TWY W BTN TWY K AND TWY W13 CLSD TO ACFT WINGSPAN MORE THAN 65M")) {
+                return "도쿄 하네다(RJTT) 유도로 TWY W (TWY K~W13 구간) 날개폭 65m 초과 대형기(A380) 통행 금지 (인가 유도로 우회 필요).";
+            }
+            if (u.includes("TWY B BTN TWY B3 AND TWY B1 CLSD TO ACFT WINGSPAN MORE THAN 118FT")) {
+                return "로스앤젤레스(KLAX) 유도로 TWY B 날개폭 118FT(36m) 초과 항공기 통행 금지 (A380 운항 시 TWY C 등 우회 필수).";
+            }
+            if (u.includes("UP TO ICAO CODE E")) {
+                return `${station} 유도로/Taxilane ICAO Code E(B777/A350 이하) 기종까지만 허용 (Code F A380 진입 제한).`;
+            }
+
+            // 4. Taxiway Closures & Stand closures
+            const mTwyClsdBtn = u.match(/TWY\s+([A-Z0-9,\s/]+?)\s+BTN\s+([A-Z0-9,\s/]+?)\s+AND\s+([A-Z0-9,\s/]+?)\s+(?:CLSD|CLOSED)/);
+            if (mTwyClsdBtn) {
+                return `${station} 유도로 TWY ${mTwyClsdBtn[1].trim()} (${mTwyClsdBtn[2].trim()} ~ ${mTwyClsdBtn[3].trim()} 구간) 공사로 인한 통행 폐쇄.`;
+            }
+            const mTwyClsd = u.match(/TWY\s+([A-Z0-9,\s/]+?)\s+(?:CLSD|CLOSED)/);
+            if (mTwyClsd) {
+                return `${station} 유도로 TWY ${mTwyClsd[1].trim()} 공사 및 노면 정비로 인한 통행 폐쇄.`;
+            }
+            const mStandClsd = u.match(/(?:STAND|ACFT STAND)\s+(?:NR\s*)?([A-Z0-9,\s/]+?)\s+(?:CLSD|CLOSED|WILL BE CLOSED)/);
+            if (mStandClsd) {
+                return `${station} 주기장 Stand ${mStandClsd[1].trim()} 임시 시설 공사로 인한 폐쇄 고시.`;
+            }
+
+            // 5. NAVAID & Standard Departure / Approach Procedures
+            if (u.includes("JFK VOR/DME OUT OF SERVICE") || (u.includes("JFK VOR/DME") && u.includes("OUT OF SERVICE"))) {
+                return "뉴욕 JFK VOR/DME 항행안전시설 운용 중단. Kennedy Five SID 출항 시 GPS/RNAV 장비 탑재기만 출항 인가.";
+            }
+            if (u.includes("CRI VOR/DME OUT OF SERVICE") || (u.includes("CRI VOR/DME") && u.includes("OUT OF SERVICE"))) {
+                return "뉴욕 CRI VOR/DME 항행안전시설 운용 중단. RWY 31L/R 출항 시 Canarsie Climb 및 Breezy Point Climb 절차 사용 불가.";
+            }
+            if (u.includes("ILS RWY 15R GP U/S")) {
+                return "인천공항(RKSI) 활주로 15R ILS 글라이드패스(GP) 결함 (로컬라이저 비정밀 접근 최저치 적용).";
+            }
+            if (u.includes("ILS RWY 26R CAT II/III NA")) {
+                return "온타리오(KONT) 활주로 26R ILS CAT II/III 정밀접근 불가 (CAT I 최저치 적용).";
+            }
+            if (u.includes("PAPI U/S") || (u.includes("PAPI") && u.includes("U/S"))) {
+                return `${station} 정밀진입각지시등(PAPI) 운용 중단 (시각 참조 불가, 계기접근 활공각 준수).`;
+            }
+            if (u.includes("ALS U/S") || (u.includes("ALS") && u.includes("U/S"))) {
+                return `${station} 진입등화시스템(ALS) 결함/정비 중 (저시정 착륙 시 최저치 상향 확인).`;
+            }
+            if (u.includes("STOP BAR LIGHT")) {
+                return `${station} 유도로 정지선등(Stop Bar Light) 시범 운영 고시 (점등 시 관제 허가와 별개로 정지 확인).`;
+            }
+            if (u.includes("RWY ENTRANCE LGT")) {
+                return `${station} 활주로 진입등화(Entrance Light) 결함 (야간 활주로 진입 시 시각 주의).`;
+            }
+            if (u.includes("TWY") && u.includes("LGT") && u.includes("U/S")) {
+                return `${station} 유도로 등화(TWY LGT) 결함/정비 중 (야간 지상 활주 시 유도선 시각 주시).`;
+            }
+
+            // 6. Obstacles & Cranes
+            if (u.includes("CRANE")) {
+                const mCrane = u.match(/(\d+FT\s*MSL|\d+FT\s*AGL)/);
+                const alt = mCrane ? mCrane[1] : "임시";
+                return `${station} 공항 인근 최고 ${alt} 높이의 기중기(Crane) 작업 설치 고시 (이착륙 안전고도 참조).`;
+            }
+
+            // 7. Volcanic Ash, Airspace & Enroute Restrictions
+            if (u.includes("VOLCANIC") || u.includes("KLYUCHEVSKOY")) {
+                return "러시아 캄차카 반도 화산재 분출 경보 (ORANGE 등급, SFC~FL250 화산재 구름 회피 필수).";
+            }
+            if (u.includes("USER PREFERRED ROUTE")) {
+                return "앵커리지 FIR 사용자 선호 항로(UPR) 비행계획 수립 지침 (지정 픽스 경유 및 합류 규정 준수).";
+            }
+            if (u.includes("YUKON 1-5") || u.includes("YUKON")) {
+                return "앵커리지 FIR 북부 군 공역(YUKON) 활성화에 따른 진입 경로 제한 (GOATS DCT BTT 의무 비행).";
+            }
+            if (u.includes("CDR ARE ESTABLISHED") || (u.includes("L512") && u.includes("MEA"))) {
+                return "후쿠오카 FIR 조건부 항로(CDR) 운영 시간 고시 (L512 개방 시간 준수).";
+            }
+            if (u.includes("TEMPORARY PROHIBITED AREA")) {
+                return "수도권/해당 공역 임시 비행금지구역 설정 고시 (지정 반경 공역 진입 절대 금지).";
+            }
+            if (u.includes("GPS SIGNALS ARE UNRELIABLE")) {
+                return "군 훈련 또는 전파 간섭으로 인한 GPS 신호 간헐적 유실/교란 주의보 (EGPWS 오경보 주의 및 재래식 항법 크로스체크).";
+            }
+            if (u.includes("TRIGGER NOTAM")) {
+                return "정기 AIRAC AIP SUP 개정 발행 사전 고시 (FMS 항행 데이터 및 최신 탑재 차트 반영 완료).";
+            }
+            if (u.includes("BRISAY RADAR")) {
+                return "몬트리올 FIR Brisay 레이더 운용 중단 (반경 200NM 내 고도/항로 변경 지연 가능성 대비).";
+            }
+            if (u.includes("CPDLC") && u.includes("LOGON")) {
+                return "공역 통과 시 CPDLC 데이터링크 접속 주소(Logon Address, PAZA/PAZN 등) 전환 지침.";
+            }
+
+            // 8. General Surface Marking / Work in Progress
+            if (u.includes("MARKING") && u.includes("WIP")) {
+                return `${station} 유도로/계류장 노면 도색(Marking) 및 유도로선 정비 작업 (표면 작업으로 지상 활주 가능).`;
+            }
+            if (u.includes("RUBBER")) {
+                return `${station} 활주로 고무질 제거(Rubber Removal) 작업 고시 (단기 노면 정비).`;
+            }
+
+            // Fallback generic operational sentence
+            return `${station} 시설 및 절차 운항 참고 고시 (원문 세부 사항 참조).`;
+        }
+
+        /**
          * Robust Index-Slicing NOTAM Parser: Captures 100% of all NOTAM blocks from fullText.
          */
         function parseAllRawNotamsWithShading(fullText) {
@@ -405,6 +549,7 @@
                 seen.add(id);
 
                 const auto = evaluateAutoShading(rawBlock, cur.station, fullText);
+                const koreanExplanation = generateKoreanExplanation(rawBlock, cur.station);
 
                 list.push({
                     index: idx++,
@@ -415,7 +560,8 @@
                     autoShaded: auto.isShaded,
                     reasonCategory: auto.reasonCategory,
                     reasonBadge: auto.reasonBadge,
-                    reasonDetail: auto.reasonDetail
+                    reasonDetail: auto.reasonDetail,
+                    koreanExplanation: koreanExplanation
                 });
             }
 
@@ -1090,7 +1236,7 @@ E) TEMPORARY PROHIBITED AREA ESTABLISHED RADIUS 2NM CENTERED ON 373523N1265832E.
 
                 // Keyword search
                 if (searchKeyword) {
-                    const haystack = `${item.id} ${item.station} ${item.raw} ${item.reasonBadge} ${item.reasonDetail}`.toLowerCase();
+                    const haystack = `${item.id} ${item.station} ${item.raw} ${item.reasonBadge} ${item.reasonDetail} ${item.koreanExplanation}`.toLowerCase();
                     if (!haystack.includes(searchKeyword)) return false;
                 }
 
@@ -1125,11 +1271,13 @@ E) TEMPORARY PROHIBITED AREA ESTABLISHED RADIUS 2NM CENTERED ON 373523N1265832E.
                 }
 
                 return `
-                    <div class="border rounded-xl p-4 transition duration-200 ${shadedClass}">
-                        <div class="flex flex-col sm:flex-row sm:items-center justify-between gap-2 pb-2.5 border-b border-slate-800/60">
+                    <div class="border rounded-xl p-4 sm:p-5 transition duration-200 space-y-3 ${shadedClass}">
+                        
+                        <!-- Top Header: ID, Badges, Period & Override Button -->
+                        <div class="flex flex-col sm:flex-row sm:items-center justify-between gap-2 pb-3 border-b border-slate-800/60">
                             <div class="flex items-center gap-2 flex-wrap">
-                                <span class="font-mono text-sm font-bold text-amber-400">${item.id}</span>
-                                <span class="text-xs px-2 py-0.5 rounded bg-slate-800 text-slate-300 font-mono">[${item.station}]</span>
+                                <span class="font-mono text-sm sm:text-base font-black text-amber-400 tracking-wide">${item.id}</span>
+                                <span class="text-xs px-2 py-0.5 rounded bg-slate-800 text-slate-300 font-mono font-bold">[${item.station}]</span>
                                 
                                 ${isShaded ? `
                                     <span class="text-[11px] px-2 py-0.5 rounded bg-slate-800/90 text-slate-300 border border-slate-700 font-mono font-medium">
@@ -1144,7 +1292,7 @@ E) TEMPORARY PROHIBITED AREA ESTABLISHED RADIUS 2NM CENTERED ON 373523N1265832E.
 
                             <!-- Right Controls: Valid Period + Toggle Shade Button -->
                             <div class="flex items-center gap-3 shrink-0">
-                                <span class="text-[11px] font-mono text-slate-500">${item.valid}</span>
+                                <span class="text-[11px] font-mono text-slate-400">${item.valid}</span>
                                 <button 
                                     onclick="toggleUserShade('${item.id}')" 
                                     class="px-2.5 py-1 rounded text-xs font-mono font-semibold transition border ${isShaded ? 'bg-amber-500/15 border-amber-500/40 text-amber-300 hover:bg-amber-500/25' : 'bg-slate-800 border-slate-700 text-slate-300 hover:bg-slate-700'}"
@@ -1155,18 +1303,29 @@ E) TEMPORARY PROHIBITED AREA ESTABLISHED RADIUS 2NM CENTERED ON 373523N1265832E.
                             </div>
                         </div>
 
-                        <!-- Shading Rationale / Operational Impact Description Banner -->
-                        <div class="mt-2.5 p-2.5 rounded-lg border text-xs font-mono flex items-start gap-2 ${isShaded ? 'bg-slate-900/90 border-slate-800 text-slate-300' : 'bg-emerald-950/30 border-emerald-800/50 text-emerald-200'}">
+                        <!-- 1. Korean Plain-Language Operational Explanation (한글 요약 해설) -->
+                        <div class="p-3 rounded-xl border border-sky-900/40 bg-sky-950/20 text-xs flex items-start gap-2.5">
+                            <span class="px-2 py-0.5 rounded bg-sky-900/80 border border-sky-700/80 text-sky-200 font-bold font-mono text-[10px] shrink-0 mt-0.5">
+                                📋 한글 요약
+                            </span>
+                            <p class="text-slate-100 font-sans text-xs sm:text-[13px] font-semibold leading-relaxed">
+                                ${item.koreanExplanation}
+                            </p>
+                        </div>
+
+                        <!-- 2. Shading Rationale / Operational Impact Status Banner -->
+                        <div class="p-2.5 rounded-lg border text-xs font-mono flex items-start gap-2 ${isShaded ? 'bg-slate-900/90 border-slate-800 text-slate-300' : 'bg-emerald-950/30 border-emerald-800/50 text-emerald-200'}">
                             <span class="px-1.5 py-0.5 rounded ${isShaded ? 'bg-slate-800 text-amber-300 font-bold border border-slate-700' : 'bg-emerald-900/80 text-emerald-200 font-bold border border-emerald-700'} text-[10px] shrink-0">
                                 ${isShaded ? '💡 음영 사유' : '🎯 운항 영향'}
                             </span>
-                            <span class="leading-relaxed">${displayDetail}</span>
+                            <span class="leading-relaxed text-[11px] sm:text-xs">${displayDetail}</span>
                         </div>
 
-                        <!-- ICAO Raw Body -->
-                        <div class="mt-3">
+                        <!-- 3. Full ICAO Raw Text Box (원문 그대로) -->
+                        <div>
                             <pre class="p-3 bg-slate-950 rounded-lg border border-slate-800/80 font-mono text-xs text-slate-200 whitespace-pre-wrap leading-relaxed selection:bg-amber-500/40">${item.raw}</pre>
                         </div>
+
                     </div>
                 `;
             }).join('');
