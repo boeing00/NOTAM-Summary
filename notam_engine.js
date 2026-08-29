@@ -1,4 +1,11 @@
 /**
+ * NOT LOADED BY THE APP.
+ *
+ * index.html carries its own inlined copy of this engine and never references
+ * this file; sw.js does not cache it either. Editing it changes nothing at
+ * runtime. Kept only for reference - fix index.html instead, or delete this.
+ */
+/**
  * Executive Cockpit Briefing Generator (100% Client-Side Engine)
  * Synthesizes flight documents into professional cockpit briefings and point-by-point route compliance reports.
  */

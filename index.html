@@ -200,7 +200,7 @@
                                     <span id="txtViewMode">모든 원문 표시 (음영 포함)</span>
                                 </button>
                                 <button onclick="batchShadeCategories()" class="px-3 py-1.5 rounded-lg border border-amber-500/40 bg-amber-500/10 hover:bg-amber-500/20 text-amber-300 transition">
-                                    ⚡ 자동음영 재계산
+                                    ↺ 수동 판정 초기화
                                 </button>
                                 <button onclick="resetAllShadingOverrides()" class="px-2.5 py-1.5 rounded-lg border border-slate-800 bg-slate-900 hover:bg-slate-800 text-slate-400 hover:text-slate-200 transition">
                                     초기화
@@ -576,6 +576,46 @@
         }
 
         /**
+         * Reads departure, destination and alternates straight out of the filed
+         * ICAO flight plan.
+         *
+         *   (FPL-AAR223-IS -A388/J-SDE... -KJFK0600 -N0493F310 DCT ... -RKSI1459 RKSS -PBN/...)
+         *                                  ^field 13                    ^field 16
+         *
+         * Fields are separated by " -". Field 13 is ADEP + EOBT, field 16 is ADES +
+         * total EET followed by the alternates. Returns null when there is no FPL to
+         * read - the caller must then say so rather than fall back to a guess.
+         */
+        function parseIcaoFpl(text) {
+            const m = String(text || "").toUpperCase().match(/\(FPL-[\s\S]{0,4000}?\)/);
+            if (!m) return null;
+
+            const flat = m[0].replace(/^\(/, "").replace(/\)$/, "").replace(/\s+/g, " ").trim();
+            const fields = flat.split(/ -/);
+
+            let dep = null, depTime = null, dest = null, eet = null, altns = [];
+            for (const f of fields) {
+                const t = f.trim();
+                if (!dep) {
+                    const d = t.match(/^([A-Z]{4})(\d{4})$/);
+                    if (d) { dep = d[1]; depTime = d[2]; continue; }
+                }
+                if (dep && !dest) {
+                    const a = t.match(/^([A-Z]{4})(\d{4})((?: +[A-Z]{4})*)$/);
+                    if (a) {
+                        dest = a[1];
+                        eet = a[2];
+                        altns = (a[3] || "").trim().split(/ +/).filter(Boolean);
+                    }
+                }
+            }
+            if (!dep || !dest) return null;
+
+            const cs = flat.match(/^FPL-([A-Z0-9]{3,8})-/);
+            return { dep, depTime, dest, eet, altns, callsign: cs ? cs[1] : null };
+        }
+
+        /**
          * Synthesizes the entire flight package text into a structured Executive Briefing Object.
          */
         function buildExecutiveBriefing(fullText, filename = "Flight_Document.pdf") {
@@ -592,19 +632,32 @@
             const typeM = upper.match(/\b(388|A380|A388|A350|A359|B777|B77W|B787|B789|A330|A333)\b/);
             const acftType = typeM ? (typeM[1] === "388" ? "A380-800" : typeM[1]) : "A380-800";
 
-            // Dep / Dest / Altn detection
-            let dep = "KJFK", dest = "RKSI", altn = "RKSS";
-            if (upper.includes("RKSI") && (upper.includes("KLAX") || upper.includes("OZ202") || upper.includes("AAR202"))) {
-                dep = "RKSI"; dest = "KLAX"; altn = "KONT";
-            } else if (upper.includes("KJFK") && (upper.includes("RKSI") || upper.includes("OZ223") || upper.includes("AAR223"))) {
-                dep = "KJFK"; dest = "RKSI"; altn = "RKSS";
-            }
+            // Dep / Dest / Altn - read from the filed flight plan, never guessed.
+            //
+            // This used to test `upper.includes("RKSI") && upper.includes("KLAX")`
+            // first. The JFK->ICN package mentions KLAX ten times (alternates, ETP
+            // lists), so that branch won every time and the whole briefing - route,
+            // FIRs, alternate, critical NOTAMs - came out as the Los Angeles flight.
+            // Field 13 and field 16 of the ICAO flight plan say it exactly; use them.
+            const fpl = parseIcaoFpl(fullText);
+            let dep = fpl ? fpl.dep : null;
+            let dest = fpl ? fpl.dest : null;
+            let altn = fpl && fpl.altns.length ? fpl.altns.join(" / ") : null;
+            const routeSource = fpl ? "FPL" : "UNKNOWN";
 
             const isJfkToIcn = (dep === "KJFK" && dest === "RKSI");
             const isIcnToLax = (dep === "RKSI" && dest === "KLAX");
+            // The hand-written per-flight sections below only describe these two
+            // legs. Anything else gets the parsed NOTAMs and nothing invented.
+            const hasFlightProfile = isJfkToIcn || isIcnToLax;
 
             const fteM = upper.match(/F\/T\s*(\d{1,2}\.\d{2})/);
-            const flightTime = fteM ? `${fteM[1].replace('.', '시간 ')}분` : (isJfkToIcn ? "14시간 59분" : "10시간 38분");
+            let flightTime = null;
+            if (fteM) {
+                flightTime = `${fteM[1].replace('.', '시간 ')}분`;
+            } else if (fpl && fpl.eet && /^\d{4}$/.test(fpl.eet)) {
+                flightTime = `${parseInt(fpl.eet.slice(0, 2), 10)}시간 ${fpl.eet.slice(2)}분`;
+            }
 
             // Route extraction
             const fplM = upper.match(/\(FPL-[^\)]+\)/);
@@ -613,17 +666,19 @@
                 routeText = fplM[0].replace(/\r?\n/g, ' ');
             } else {
                 const rMatch = upper.match(/(KJFK\.\.[^\n\r]+|RKSI\.\.[^\n\r]+)/);
-                routeText = rMatch ? rMatch[0] : (isJfkToIcn ? "KJFK..GREKI..JUDDS..CAM..EPTUL..N50W075..N55W078..N57W080..N61W090..N63W100..N65W110..N66W120..N67W130..GOATS..BTT..N66W160..N63W170..MUCLA R338 NATES R220 NODAN R217 ASTER Y514 SDE Y512 GTC L512 TENAS Y437 KAE Y697 KARBU..RKSI" : "RKSI DCT EGOBA Y697 LANAT Y51 SAMON Y142 GTC Y512 OATIS R580 OPHET R580 OPAKE A342 AMOND 55N170W 54N160W 53N150W 51N140W 45N130W DCT NATTE DCT OAK DCT BURGL IRNMN2 KLAX");
+                routeText = rMatch ? rMatch[0] : (!hasFlightProfile ? "" : isJfkToIcn ? "KJFK..GREKI..JUDDS..CAM..EPTUL..N50W075..N55W078..N57W080..N61W090..N63W100..N65W110..N66W120..N67W130..GOATS..BTT..N66W160..N63W170..MUCLA R338 NATES R220 NODAN R217 ASTER Y514 SDE Y512 GTC L512 TENAS Y437 KAE Y697 KARBU..RKSI" : "RKSI DCT EGOBA Y697 LANAT Y51 SAMON Y142 GTC Y512 OATIS R580 OPHET R580 OPAKE A342 AMOND 55N170W 54N160W 53N150W 51N140W 45N130W DCT NATTE DCT OAK DCT BURGL IRNMN2 KLAX");
             }
 
-            // Refile & ETP & FIRs
-            const refileStr = isJfkToIcn ? "도쿄 하네다 (RJTT), 오사카 간사이 (RJBB)" : "해당 없음";
-            const etpStr = isJfkToIcn ? "시카고 (KORD), 앵커리지 (PANC), 삿포로 (RJCC), 몬트리올 (CYUL), 에드먼턴 (CYEG) 등" : "삿포로 (RJCC), 콜드베이 (PACD), 샌프란시스코 (KSFO) 등";
-            const firStr = isJfkToIcn 
+            // Refile & ETP & FIRs - only meaningful for a leg we recognise.
+            const UNKNOWN = "문서에서 확인되지 않음";
+            const refileStr = !hasFlightProfile ? UNKNOWN : isJfkToIcn ? "도쿄 하네다 (RJTT), 오사카 간사이 (RJBB)" : "해당 없음";
+            const etpStr = !hasFlightProfile ? UNKNOWN : isJfkToIcn ? "시카고 (KORD), 앵커리지 (PANC), 삿포로 (RJCC), 몬트리올 (CYUL), 에드먼턴 (CYEG) 등" : "삿포로 (RJCC), 콜드베이 (PACD), 샌프란시스코 (KSFO) 등";
+            const firStr = !hasFlightProfile ? UNKNOWN : isJfkToIcn 
                 ? "KZNY (뉴욕) ➔ KZBW (보스턴) ➔ CZUL (몬트리올) ➔ CZWG (위니펙) ➔ CZEG (에드먼턴) ➔ PAZA (앵커리지) ➔ RJJJ (후쿠오카) ➔ RKRR (인천)"
                 : "RKRR (인천) ➔ RJJJ (후쿠오카) ➔ PAZA (앵커리지) ➔ KZAK (오클랜드 해양) ➔ KZSE (시애틀) ➔ KZOA (오클랜드) ➔ KZLA (로스앤젤레스)";
 
             // 2. Build Critical NOTAMs with Raw Text (Flight Specific!)
+            // Stays empty for any leg these hand-written blocks do not cover.
             const criticalNotams = [];
             if (isJfkToIcn) {
                 criticalNotams.push({
@@ -682,7 +737,7 @@ E) AD NOT AVBL TO ACFT WITH WINGSPAN GREATER THAN 213FT`
                     raw: `17AUG26 00:43 - 17AUG27 00:30 PAZA A2428/26
 E) VOLCANIC ACTIVITY ADVISORY FOR KLYUCHEVSKOY VOLCANO / 560300N1603900E / KAMCHATKAN PENINSULA, RUSSIA. COLOR CODE ORANGE. F) SFC G) FL250`
                 });
-            } else {
+            } else if (isIcnToLax) {
                 // ICN-LAX (AAR202 / OZ202)
                 criticalNotams.push({
                     badge: "CRITICAL",
@@ -807,7 +862,7 @@ DEPARTURE PROCEDURE NA EXCEPT FOR ACFT EQUIPPED WITH SUITABLE RNAV SYSTEM WITH G
 E) TEMPORARY PROHIBITED AREA ESTABLISHED RADIUS 2NM CENTERED ON 373523N1265832E. F) SFC G) UNL`
                     }
                 );
-            } else {
+            } else if (isIcnToLax) {
                 // ICN-LAX (AAR202 / OZ202)
                 compliancePoints.push(
                     {
@@ -881,7 +936,7 @@ E) NAV ILS RWY 26R CAT II/III NA`
             }
 
             // 4. Caution Airport Breakdown Table Data with Raw Text
-            const cautionAirports = isJfkToIcn ? [
+            const cautionAirports = !hasFlightProfile ? [] : isJfkToIcn ? [
                 { stn: "RKSI", id: "Z0511/24", item: "인천 FIR 군 훈련으로 인한 GPS 신호 간헐적 교란", action: "Nuisance GPWS 경보 주의, VOR/DME 크로스체크", raw: "30MAY24 01:15 - UFN RKSI Z0511/24\nE) CAUTIONARY INFO FOR ACFT OPERATING IN INCHEON FIR : PILOTS HAVE REPORTED THAT GPS SIGNALS ARE UNRELIABLE OR LOST INTERMITTENTLY IN INCHEON FIR(AROUND INCHEON AND SEOUL AREA)." },
                 { stn: "RKSI", id: "COAD05/26", item: "NDB 개정으로 인한 FMS 400FT AGL 이하 조기 선회 금지", action: "이륙/복행 시 400ft 이전 선회 금지 (FOM 6.4.4)", raw: "15JUN26 00:00 - 31DEC26 23:59 RKSI COAD05/26\nE) COMPANY ADVISORY: EARLY TURN BELOW 400FT AGL PROHIBITED AFTER NDB REVISION." },
                 { stn: "RKSI", id: "A1073/26", item: "Taxilane R23, R24 Code E까지만 진입 가능", action: "Code F(A380) 진입 불가, Stand 208R/290R 유의", raw: "31JUL26 04:34 - 30SEP26 16:00 RKSI A1073/26\nE) TXL R23, R24 AVBL FOR ACFT UP TO ICAO CODE E WHEN TAXIING TO STAND 208R, 290R" },
@@ -898,7 +953,7 @@ E) NAV ILS RWY 26R CAT II/III NA`
             ];
 
             // 5. Checklist Items
-            const checklist = isJfkToIcn ? [
+            const checklist = !hasFlightProfile ? [] : isJfkToIcn ? [
                 { text: "KJFK 출발 이륙 활주로 집중 및 지상 정체 대비", desc: "RWY 04L/22R & 04R/22L 동시 폐쇄(A7259/58). 31L/13R 단일 이륙 집중 대비 추가 택시 연료 및 시간 관리." },
                 { text: "KJFK 출항 시 RNAV 상태 점검", desc: "JFK VOR & CRI VOR 운용 중단(A7174/A7252). Kennedy Five SID 출항 시 GPS Primary 정상 확인." },
                 { text: "캐나다 구간 비상 회항 시 CYUL(몬트리올) 배제", desc: "CYUL 날개폭 213ft 제한 및 타사기 회항 불가 고시(E4479/E4943). 비상 시 CYYZ(토론토) 등 인가 공항 선정." },
@@ -913,7 +968,7 @@ E) NAV ILS RWY 26R CAT II/III NA`
             ];
 
             // 6. In-flight Monitoring Reminders
-            const inFlightReminders = isJfkToIcn ? [
+            const inFlightReminders = !hasFlightProfile ? [] : isJfkToIcn ? [
                 { title: "PAZA CPDLC Logon 주소 전환 확인", desc: "GOATS 진입 시 PAZA로 접속 ➔ 서경 167°W~174°W 서쪽 통과 시 PAZN 주소 사용 (PAZA A0044/24)." },
                 { title: "CZUL/CZWG 통과 시 레이더/주파수 점검", desc: "Brisay Radar U/S(H5625/26) 및 위니펙 일부 주파수 단절(G3067/26)에 따른 고도/항로 변경 지연 가능성 대비." },
                 { title: "인천 접근 시 GPS 모니터링", desc: "인천 FIR 진입 후 군 훈련 GPS 간섭(RKRR Z0555/26)으로 인한 EGPWS 불필요 경보 발생 여부 주시." }
@@ -935,6 +990,8 @@ E) NAV ILS RWY 26R CAT II/III NA`
                     altn,
                     isJfkToIcn,
                     isIcnToLax,
+                    hasFlightProfile,
+                    routeSource,
                     flightTime,
                     routeText,
                     refileStr,
@@ -990,7 +1047,32 @@ E) NAV ILS RWY 26R CAT II/III NA`
         function renderExecutiveReport(b) {
             const doc = document.getElementById('reportDocument');
             const isJfkToIcn = (b.meta.isJfkToIcn !== undefined) ? b.meta.isJfkToIcn : (b.meta.dep === "KJFK");
-            document.getElementById('headerSubtitle').innerText = `${b.meta.flightNo} (${b.meta.callsign}) | ${b.meta.dep} ➔ ${b.meta.dest} | ${b.meta.acftType} ${b.meta.reg}`;
+
+            // Nothing was recognised in this document. Previously the app fell
+            // through to the stored AAR223 briefing and printed a green
+            // "verified compliant" banner over zero parsed NOTAMs - a briefing
+            // for somebody else's flight. Stop here instead.
+            if (!allParsedNotams.length) {
+                document.getElementById('headerSubtitle').innerText =
+                    b.meta.filename + " \u2014 NOTAM 미인식";
+                doc.innerHTML = '<div class="p-5 bg-rose-950/40 border border-rose-800/70 rounded-xl">'
+                    + '<div class="flex items-start gap-3">'
+                    + '<i data-lucide="alert-triangle" class="w-5 h-5 text-rose-400 shrink-0 mt-0.5"></i>'
+                    + '<div class="space-y-2">'
+                    + '<strong class="text-sm font-bold text-rose-200 block">이 문서에서 NOTAM을 하나도 인식하지 못했습니다</strong>'
+                    + '<p class="text-xs text-slate-300 leading-relaxed">브리핑을 생성하지 않습니다. 지원하는 NOTAM 패키지 형식이 아니거나, 스캔 PDF라 텍스트 추출이 되지 않는 문서일 수 있습니다.</p>'
+                    + '<p class="text-xs text-slate-400">파일: <span class="font-mono text-slate-300">' + b.meta.filename + '</span></p>'
+                    + '</div></div></div>';
+                lucide.createIcons();
+                return;
+            }
+
+            // Never print a stored default for something the document did not say.
+            const dep = b.meta.dep || "미확인";
+            const dest = b.meta.dest || "미확인";
+            const altn = b.meta.altn || "문서에서 확인되지 않음";
+            const flightTime = b.meta.flightTime || "문서에서 확인되지 않음";
+            document.getElementById('headerSubtitle').innerText = `${b.meta.flightNo} (${b.meta.callsign}) | ${dep} ➔ ${dest} | ${b.meta.acftType} ${b.meta.reg}`;
 
             let html = `
                 <!-- 1. Header Overview -->
@@ -1003,33 +1085,35 @@ E) NAV ILS RWY 26R CAT II/III NA`
                             </h1>
                         </div>
                         <div class="text-left sm:text-right">
-                            <span class="inline-flex items-center gap-1.5 px-3 py-1 rounded-full bg-emerald-500/10 border border-emerald-500/30 text-emerald-400 text-xs font-bold font-mono">
+                            <span class="inline-flex items-center gap-1.5 px-3 py-1 rounded-full bg-slate-800 border border-slate-700 text-emerald-400 text-xs font-bold font-mono">
                                 <i data-lucide="check-circle-2" class="w-3.5 h-3.5"></i>
-                                비행계획 항로 NOTAM 100% 준수
+                                항로 검토 자료 · 판정 아님
                             </span>
                         </div>
                     </div>
 
                     <div class="grid grid-cols-1 sm:grid-cols-2 gap-2 text-xs bg-slate-950/70 border border-slate-800 rounded-xl p-4 font-mono">
                         <div><span class="text-slate-500">운항 편명:</span> <strong class="text-slate-200">${b.meta.callsign} / ${b.meta.flightNo} (${b.meta.reg}, ${b.meta.acftType})</strong></div>
-                        <div><span class="text-slate-500">비행 구간:</span> <strong class="text-amber-300">${b.meta.dep} ➔ ${b.meta.dest}</strong> (예상 비행시간: ${b.meta.flightTime})</div>
-                        <div><span class="text-slate-500">지정 교체공항(ALTN):</span> <strong class="text-slate-200">${b.meta.altn}</strong></div>
+                        <div><span class="text-slate-500">비행 구간:</span> <strong class="text-amber-300">${dep} ➔ ${dest}</strong> (예상 비행시간: ${flightTime})</div>
+                        <div><span class="text-slate-500">지정 교체공항(ALTN):</span> <strong class="text-slate-200">${altn}</strong></div>
                         <div><span class="text-slate-500">리파일(Refile) 공항:</span> <strong class="text-slate-200">${b.meta.refileStr}</strong></div>
                         <div class="sm:col-span-2"><span class="text-slate-500">주요 ETP 및 회항 공항:</span> <span class="text-slate-300">${b.meta.etpStr}</span></div>
                         <div class="sm:col-span-2"><span class="text-slate-500">통과 비행정보구역(FIR):</span> <span class="text-slate-300">${b.meta.firStr}</span></div>
                     </div>
                 </div>
 
-                <!-- 2. Overall Verdict & Filed Route -->
+                <!-- 2. Route review material - NOT an automated determination -->
                 <div class="space-y-3">
-                    <div class="p-4 bg-emerald-950/30 border border-emerald-800/60 rounded-xl flex items-start gap-3">
-                        <div class="p-1.5 bg-emerald-500/20 text-emerald-400 rounded-lg shrink-0 mt-0.5">
-                            <i data-lucide="shield-check" class="w-5 h-5"></i>
+                    <div class="p-4 bg-slate-950/70 border border-slate-800 rounded-xl flex items-start gap-3">
+                        <div class="p-1.5 bg-amber-500/15 text-amber-400 rounded-lg shrink-0 mt-0.5">
+                            <i data-lucide="clipboard-list" class="w-5 h-5"></i>
                         </div>
                         <div>
-                            <strong class="text-sm font-bold text-emerald-300 block">🎯 [종합 결론] 비행계획 항로 준수성 검증 완료</strong>
+                            <strong class="text-sm font-bold text-amber-200 block">[항로 검토 자료] 자동 준수 판정이 아닙니다</strong>
                             <p class="text-xs text-slate-300 mt-1 leading-relaxed">
-                                현재 비행계획(FPL)은 항로상의 <strong>모든 NOTAM 제한사항, NOPAC/UPR 대양 항로 규정, 공항 활주로/유도로 제약 및 공역 지침을 100% 완벽하게 준수(COMPLIANT)</strong>하고 있습니다.
+                                아래 항목은 해당 구간에 대해 사전에 작성된 <strong>검토 참고 자료</strong>입니다.
+                                이 앱은 비행계획과 NOTAM을 대조해 준수 여부를 계산하지 않습니다.
+                                최종 판단은 반드시 원문과 디스패치 브리핑으로 확인하십시오.
                             </p>
                         </div>
                     </div>
@@ -1474,6 +1558,16 @@ E) NAV ILS RWY 26R CAT II/III NA`
         }
 
         function batchShadeCategories() {
+            // This does not recalculate anything - it drops every manual override
+            // so the automatic rules apply again. That can be hundreds of
+            // decisions, so ask first and say plainly what is about to happen.
+            const overrides = Object.keys(userShadingMap).length;
+            if (overrides === 0) return;
+            const ok = confirm(
+                `수동으로 변경하신 음영 판정 ${overrides}건을 모두 버리고 ` +
+                `자동 음영 기준으로 되돌립니다.\n\n계속하시겠습니까?`
+            );
+            if (!ok) return;
             userShadingMap = {};
             renderRawNotamList();
         }
@@ -1555,7 +1649,7 @@ E) NAV ILS RWY 26R CAT II/III NA`
                     await r.unregister();
                 }
             }
-            window.location.reload(true);
+            window.location.reload();
         }
 
         // PWA Service Worker Registration with automatic update
