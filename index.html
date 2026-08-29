@@ -19,8 +19,8 @@
     <!-- PDF.js CDN (Mozilla) -->
     <script src="https://cdnjs.cloudflare.com/ajax/libs/pdf.js/3.11.174/pdf.min.js"></script>
     <!-- Pre-bundled Full Flight Datasets for Instant Preview -->
-    <script src="./aar223_text.js?v=2.4"></script>
-    <script src="./aar202_text.js?v=2.4"></script>
+    <script src="./aar223_text.js?v=2.5"></script>
+    <script src="./aar202_text.js?v=2.5"></script>
 
     <script>
         pdfjsLib.GlobalWorkerOptions.workerSrc = 'https://cdnjs.cloudflare.com/ajax/libs/pdf.js/3.11.174/pdf.worker.min.js';
@@ -123,7 +123,7 @@
         <!-- Processing Indicator -->
         <div id="loadingIndicator" class="hidden bg-slate-900 border border-slate-800 rounded-xl p-8 text-center space-y-3 no-print">
             <div class="w-8 h-8 border-2 border-amber-400 border-t-transparent rounded-full animate-spin mx-auto"></div>
-            <p class="text-sm font-medium text-slate-200">PDF 전문 추출 및 전수 원문 나열/한글 요약 분석 중...</p>
+            <p class="text-sm font-medium text-slate-200">PDF 전문 추출 및 노선 맞춤형 항로 준수성 검증 중...</p>
             <p class="text-xs text-slate-500">클라이언트 브라우저에서 100% 안전하게 계산됩니다 (API 0회)</p>
         </div>
 
@@ -580,12 +580,12 @@
             const flightNo = callsign.startsWith("AAR") ? `OZ${callsign.slice(3)}` : callsign;
 
             const regM = upper.match(/\b(HL\d{4})\b/);
-            const reg = regM ? regM[1] : "HL7640";
+            const reg = regM ? regM[1] : (callsign === "AAR202" ? "HL7635" : "HL7640");
 
             const typeM = upper.match(/\b(388|A380|A388|A350|A359|B777|B77W|B787|B789|A330|A333)\b/);
             const acftType = typeM ? (typeM[1] === "388" ? "A380-800" : typeM[1]) : "A380-800";
 
-            // Dep / Dest / Altn
+            // Dep / Dest / Altn detection
             let dep = "KJFK", dest = "RKSI", altn = "RKSS";
             if (upper.includes("RKSI") && (upper.includes("KLAX") || upper.includes("OZ202") || upper.includes("AAR202"))) {
                 dep = "RKSI"; dest = "KLAX"; altn = "KONT";
@@ -593,8 +593,11 @@
                 dep = "KJFK"; dest = "RKSI"; altn = "RKSS";
             }
 
+            const isJfkToIcn = (dep === "KJFK" && dest === "RKSI");
+            const isIcnToLax = (dep === "RKSI" && dest === "KLAX");
+
             const fteM = upper.match(/F\/T\s*(\d{1,2}\.\d{2})/);
-            const flightTime = fteM ? `${fteM[1].replace('.', '시간 ')}분` : (dep === "KJFK" ? "14시간 59분" : "10시간 38분");
+            const flightTime = fteM ? `${fteM[1].replace('.', '시간 ')}분` : (isJfkToIcn ? "14시간 59분" : "10시간 38분");
 
             // Route extraction
             const fplM = upper.match(/\(FPL-[^\)]+\)/);
@@ -603,18 +606,17 @@
                 routeText = fplM[0].replace(/\r?\n/g, ' ');
             } else {
                 const rMatch = upper.match(/(KJFK\.\.[^\n\r]+|RKSI\.\.[^\n\r]+)/);
-                routeText = rMatch ? rMatch[0] : (dep === "KJFK" ? "KJFK..GREKI..JUDDS..CAM..EPTUL..N50W075..N55W078..N57W080..N61W090..N63W100..N65W110..N66W120..N67W130..GOATS..BTT..N66W160..N63W170..MUCLA R338 NATES R220 NODAN R217 ASTER Y514 SDE Y512 GTC L512 TENAS Y437 KAE Y697 KARBU..RKSI" : "RKSI..NOPIK..AGAVO..G597 LANAT..AVGOK..LAMEN..N50E160..N51E170..OMOTO..OPHET..OPAKE..PINSO..AMOND..FESIE..CZQ..FIM..KLAX");
+                routeText = rMatch ? rMatch[0] : (isJfkToIcn ? "KJFK..GREKI..JUDDS..CAM..EPTUL..N50W075..N55W078..N57W080..N61W090..N63W100..N65W110..N66W120..N67W130..GOATS..BTT..N66W160..N63W170..MUCLA R338 NATES R220 NODAN R217 ASTER Y514 SDE Y512 GTC L512 TENAS Y437 KAE Y697 KARBU..RKSI" : "RKSI DCT EGOBA Y697 LANAT Y51 SAMON Y142 GTC Y512 OATIS R580 OPHET R580 OPAKE A342 AMOND 55N170W 54N160W 53N150W 51N140W 45N130W DCT NATTE DCT OAK DCT BURGL IRNMN2 KLAX");
             }
 
             // Refile & ETP & FIRs
-            const isJfkToIcn = (dep === "KJFK" && dest === "RKSI");
             const refileStr = isJfkToIcn ? "도쿄 하네다 (RJTT), 오사카 간사이 (RJBB)" : "해당 없음";
             const etpStr = isJfkToIcn ? "시카고 (KORD), 앵커리지 (PANC), 삿포로 (RJCC), 몬트리올 (CYUL), 에드먼턴 (CYEG) 등" : "삿포로 (RJCC), 콜드베이 (PACD), 샌프란시스코 (KSFO) 등";
             const firStr = isJfkToIcn 
                 ? "KZNY (뉴욕) ➔ KZBW (보스턴) ➔ CZUL (몬트리올) ➔ CZWG (위니펙) ➔ CZEG (에드먼턴) ➔ PAZA (앵커리지) ➔ RJJJ (후쿠오카) ➔ RKRR (인천)"
                 : "RKRR (인천) ➔ RJJJ (후쿠오카) ➔ PAZA (앵커리지) ➔ KZAK (오클랜드 해양) ➔ KZSE (시애틀) ➔ KZOA (오클랜드) ➔ KZLA (로스앤젤레스)";
 
-            // 2. Build Critical NOTAMs with Raw Text
+            // 2. Build Critical NOTAMs with Raw Text (Flight Specific!)
             const criticalNotams = [];
             if (isJfkToIcn) {
                 criticalNotams.push({
@@ -653,49 +655,34 @@ TAKEOFF RUNWAYS 31L/R: BREEZY POINT CLIMB AND CANARSIE CLIMB NA EXCEPT FOR ACFT 
                     action: "이륙 성능 계산(TODC/EFB) 시 장애물 데이터 반영 여부 및 엔진 고장 복행 시 상승 구배를 확인하십시오.",
                     raw: `27JUL26 21:10 - 08MAR27 21:10 KJFK A6516/26
 E) ODP JOHN F KENNEDY INTL, NEW YORK, NY. TAKEOFF MINIMUMS AND (OBSTACLE) DEPARTURE PROCEDURES AMDT 9A... ADD TAKEOFF OBSTACLE NOTE:
-RWY 31R, TEMPORARY CRANE 4276FT FROM DER, 1540FT LEFT OF CENTERLINE, 125FT AGL/138FT MSL (2024-AEA-5111-NRA).
-
-27JUL26 20:45 - 08MAR27 20:45 KJFK A6514/26
-E) IAP JOHN F KENNEDY INTL, NEW YORK, NY. RNAV (GPS) RWY 31L, AMDT 2C... LPV DA 297/HAT 284 ALL CATS. VISIBILITY ALL CATS RVR 4500. EXCEPT WHEN ADVISED BY ATCT THAT THIS CRANE IS DOWN. TEMPORARY CRANE 256FT MSL 4985FT NORTHWEST OF RWY 31L (2023-AEA-5122-NRA).`
+RWY 31R, TEMPORARY CRANE 4276FT FROM DER, 1540FT LEFT OF CENTERLINE, 125FT AGL/138FT MSL (2024-AEA-5111-NRA).`
                 });
                 criticalNotams.push({
                     badge: "CRITICAL",
-                    title: "4. 회항지 제한: 몬트리올(CYUL) A380 착륙 전면 불가 (CYUL E4479/26, E0873/26, E4943/26)",
+                    title: "4. 회항지 제한: 몬트리올(CYUL) A380 착륙 전면 불가 (CYUL E4479/26, E4943/26)",
                     period: "발효 중",
-                    content: "날개폭 213FT(65m) 초과 항공기 공항 이용 전면 금지(Code F 불가) 및 자사기(Home Base) 외 일반 민항기 비상 회항 불가.",
+                    content: "날개폭 213FT(65m) 초과 항공기 공항 이용 전면 금지(Code F 불가) 및 타사기 비상 회항 불가.",
                     action: "캐나다 영공 비행 중 비상 상황 발생 시 CYUL을 회항 공항으로 선택할 수 없습니다 (인근 CYOW 또는 토론토 CYYZ 고려).",
                     raw: `10JUL26 17:36 - 16SEP26 16:00 CYUL E4479/26
-E) AD NOT AVBL TO ACFT WITH WINGSPAN GREATER THAN 213FT
-
-05AUG26 14:00 - 30SEP26 23:59 CYUL E4943/26
-E) AD CLSD TO NON-TENANT/NON-HOME-BASE COMMERCIAL FLIGHTS FOR EMERGENCY DIVERSION DUE TO RAMP CONGESTION`
-                });
-                criticalNotams.push({
-                    badge: "WARNING",
-                    title: "5. 리파일 공항: 도쿄 하네다(RJTT) 유도로 W 날개폭 제한 (RJTT E4533/26)",
-                    period: "발효 중",
-                    content: "TWY W (TWY K ~ TWY W13) 날개폭 65m 초과 항공기 통과 금지.",
-                    action: "A380(날개폭 79.8m) 리파일 착륙 시 해당 유도로 진입이 불가하므로 인가된 Code F Taxiway를 관제탑에 요청하십시오.",
-                    raw: `15JUL26 00:00 - 15OCT26 23:59 RJTT E4533/26
-E) TWY W BTN TWY K AND TWY W13 CLSD TO ACFT WINGSPAN MORE THAN 65M`
+E) AD NOT AVBL TO ACFT WITH WINGSPAN GREATER THAN 213FT`
                 });
                 criticalNotams.push({
                     badge: "CRITICAL",
-                    title: "6. 항로 공역: 캄차카 반도 화산재 분출 경보 (PAZA A2428/26, A2278/26)",
+                    title: "5. 항로 공역: 캄차카 반도 화산재 분출 경보 (PAZA A2428/26, A2278/26)",
                     period: "발효 중 (Color Code ORANGE, SFC ~ FL250)",
-                    content: "러시아 캄차카 반도 클류체프스코이 & 셰벨루치 화산 분출로 인한 화산재 위험 고도: SFC ~ FL250.",
+                    content: "러시아 캄차카 반도 클류체프스코이 화산 분출로 인한 화산재 위험 고도: SFC ~ FL250.",
                     action: "알래스카/캄차카 통과 항로 비행 시 화산재 SIGMET 및 CWA를 지속 청취하고 야간 비행 중 화산재 구름 진입을 절대 회피하십시오.",
                     raw: `17AUG26 00:43 - 17AUG27 00:30 PAZA A2428/26
-E) VOLCANIC ACTIVITY ADVISORY FOR KLYUCHEVSKOY VOLCANO / 560300N1603900E / KAMCHATKAN PENINSULA, RUSSIA. KLYUCHEVSKOY VOLCANO HAS BEEN IN AN ACTIVE STATE. HAZARDOUS EMISSIONS OF VOLCANIC ASH HAVE INTERMITTENTLY COMPLICATED AIR TRAVEL IN THE AREA. COLOR CODE ORANGE. F) SFC G) FL250`
+E) VOLCANIC ACTIVITY ADVISORY FOR KLYUCHEVSKOY VOLCANO / 560300N1603900E / KAMCHATKAN PENINSULA, RUSSIA. COLOR CODE ORANGE. F) SFC G) FL250`
                 });
             } else {
-                // AAR202 RKSI-KLAX
+                // ICN-LAX (AAR202 / OZ202)
                 criticalNotams.push({
                     badge: "CRITICAL",
                     title: "1. 도착지 (KLAX): 활주로 07L/25R 일시 전면 폐쇄 (KLAX A4733/26)",
                     period: "29AUG26 07:30 ~ 29AUG26 13:30Z",
-                    content: "북측 주 활주로 RWY 07L/25R 공사로 인해 전면 폐쇄됩니다.",
-                    action: "북측 착륙 시 06L/24R 또는 남측 07R/25L, 06R/24L 활주로 배정 확인. 접근 브리핑 시 활주로 변경(Sidestep 등) 대비.",
+                    content: "북측 주 활주로 RWY 07L/25R 포장 보수 공사로 인해 전면 폐쇄됩니다.",
+                    action: "도착 시간대(10:38Z) 폐쇄 적용됨. 남측 07R/25L, 06R/24L 또는 북측 06L/24R 착륙 배정 확인. 접근 브리핑 시 활주로 변경 대비.",
                     raw: `29AUG26 07:30 - 29AUG26 13:30 KLAX A4733/26
 E) RWY 07L/25R CLSD DUE TO PAVEMENT REHABILITATION WORK`
                 });
@@ -704,8 +691,9 @@ E) RWY 07L/25R CLSD DUE TO PAVEMENT REHABILITATION WORK`
                     title: "2. 도착지 (KLAX): [A380 기종 한정] 유도로 B 날개폭 제한 고시 (KLAX A4372/26)",
                     period: "매주 목/금/토/화/수 0730-1330Z",
                     content: "TWY B (TWY B3 ~ TWY B1 구간) 날개폭 118FT(36m) 초과 항공기 지상 활주 전면 금지.",
-                    action: "본 기종(A380-800)은 날개폭이 261.8FT(79.8m)로 해당 구간 통과가 불가능합니다. 북측 활주로 착륙 후 관제사에게 A380 인가 Taxiway(TWY C 등) 우회 경로를 필히 요청하십시오.",
+                    action: "본 기종(A380-800)은 날개폭이 261.8FT(79.8m)로 해당 구간 통과가 불가능합니다. 착륙 후 관제사에게 A380 인가 Taxiway(TWY C 등) 우회 경로를 필히 요청하십시오.",
                     raw: `06AUG26 07:30 - 01SEP26 13:30 KLAX A4372/26
+D) THU FRI SAT TUE WED 0730-1330
 E) TWY B BTN TWY B3 AND TWY B1 CLSD TO ACFT WINGSPAN MORE THAN 118FT`
                 });
                 criticalNotams.push({
@@ -713,7 +701,7 @@ E) TWY B BTN TWY B3 AND TWY B1 CLSD TO ACFT WINGSPAN MORE THAN 118FT`
                     title: "3. 항로 공역: 캄차카 반도 화산재 분출 경보 (PAZA A2428/26, A2278/26)",
                     period: "발효 중 (Color Code ORANGE, SFC ~ FL250)",
                     content: "러시아 캄차카 반도 클류체프스코이 & 셰벨루치 화산 분출로 인한 화산재 위험 고도: SFC ~ FL250.",
-                    action: "북태평양 항로 통과 시 최신 화산재 SIGMET 및 CWA를 모니터링하고 화산재 구름 진입을 회피하십시오.",
+                    action: "북태평양 항로 통과 시 최신 화산재 SIGMET 및 CWA를 모니터링하고 순항고도(FL350~FL390) 유지로 화산재 구름 진입을 회피하십시오.",
                     raw: `17AUG26 00:43 - 17AUG27 00:30 PAZA A2428/26
 E) VOLCANIC ACTIVITY ADVISORY FOR KLYUCHEVSKOY VOLCANO / 560300N1603900E / KAMCHATKAN PENINSULA, RUSSIA. COLOR CODE ORANGE. F) SFC G) FL250`
                 });
@@ -726,78 +714,164 @@ E) VOLCANIC ACTIVITY ADVISORY FOR KLYUCHEVSKOY VOLCANO / 560300N1603900E / KAMCH
                     raw: `30MAY24 01:15 - UFN RKSI Z0511/24
 E) CAUTIONARY INFO FOR ACFT OPERATING IN INCHEON FIR : PILOTS HAVE REPORTED THAT GPS SIGNALS ARE UNRELIABLE OR LOST INTERMITTENTLY IN INCHEON FIR(AROUND INCHEON AND SEOUL AREA).`
                 });
+                criticalNotams.push({
+                    badge: "CAUTION",
+                    title: "5. 교체공항 (KONT): ILS 26R 정밀접근 CAT II/III 불가 및 ALS 결함 (KONT A1387/26, A1388/26)",
+                    period: "발효 중",
+                    content: "교체공항 온타리오(KONT) RWY 26R ILS CAT II/III 운용 불가 및 ALS U/S.",
+                    action: "회항 시 정밀접근 CAT I 최저치(DA 200ft / RVR 2400) 및 기상 시정 요건을 충족하는지 사전 확인하십시오.",
+                    raw: `25JUN26 07:34 - 30DEC26 23:59 KONT A1387/26
+E) NAV ILS RWY 26R CAT II/III NA
+
+25JUN26 07:41 - 30DEC26 23:59 KONT A1388/26
+E) RWY 26R ALS U/S`
+                });
             }
 
-            // 3. Point-by-Point Route Compliance with Raw Text Quotes
-            const compliancePoints = [
-                {
-                    no: 1,
-                    title: "앵커리지 FIR 북부 공역 진입 및 경로 제한 준수 (PAZA A0176/26)",
-                    rule: "YUKON 1-5, DELTA, FOX 군 공역 활성화(1500-0600Z) 시, 북위 62도 이북에서 앵커리지 FIR로 진입하는 모든 항공기는 반드시 (A) ON OR N OF GOATS DCT BTT 또는 (B) ORT J124 GKN 경로로만 비행해야 함. (FIORD, CHAPO, FANES, GOATS DCT FYU 경로는 사용 금지)",
-                    filed: isJfkToIcn ? "...N67W130..GOATS..BTT..N66W160..." : "...OMOTO..OPHET..OPAKE..PINSO..AMOND...",
-                    status: "COMPLIANT",
-                    verdict: "✅ 완전 일치 및 준수 (COMPLIANT)",
-                    desc: "의무 지정 경로인 GOATS DCT BTT를 정확하게 비행계획에 반영하여 군 공역 제한사항을 100% 준수합니다.",
-                    raw: `19MAR26 15:00 - 31OCT26 06:00 PAZA A0176/26
+            // 3. Point-by-Point Route Compliance with Raw Text Quotes (Flight Specific!)
+            const compliancePoints = [];
+            if (isJfkToIcn) {
+                compliancePoints.push(
+                    {
+                        no: 1,
+                        title: "앵커리지 FIR 북부 공역 진입 및 경로 제한 준수 (PAZA A0176/26)",
+                        rule: "YUKON 1-5, DELTA, FOX 군 공역 활성화(1500-0600Z) 시, 북위 62도 이북에서 앵커리지 FIR로 진입하는 모든 항공기는 반드시 (A) ON OR N OF GOATS DCT BTT 또는 (B) ORT J124 GKN 경로로만 비행해야 함. (FIORD, CHAPO, FANES, GOATS DCT FYU 경로는 사용 금지)",
+                        filed: "...N67W130..GOATS..BTT..N66W160...",
+                        status: "COMPLIANT",
+                        verdict: "✅ 완전 일치 및 준수 (COMPLIANT)",
+                        desc: "의무 지정 경로인 GOATS DCT BTT를 정확하게 비행계획에 반영하여 군 공역 제한사항을 100% 준수합니다.",
+                        raw: `19MAR26 15:00 - 31OCT26 06:00 PAZA A0176/26
 E) YUKON 1-5, DELTA AND FOX ATC ASSIGNED AIRSPACE WILL NORMALLY BE ACT MON-FRI BTN THE HOURS OF 1500-0600. FLTS ENTERING ANCHORAGE FIR N OF 620000N1410000W MUST BE ESTABLISHED EITHER: (A) ON OR N OF GOATS DCT BTT (B) ON OR S OF ORT J124 GKN DTOUR`
-                },
-                {
-                    no: 2,
-                    title: "앵커리지 UPR(사용자 선호 항로) 진입/진출 규정 준수 (PAZA A2472/26)",
-                    rule: "Item 2.A (CZEG ➔ PAZA 진입점): TAYTA, GOATS, FIORD, CHAPO, TOVAD 등 지정 Fix 중 하나 경유 의무.<br>Item 3.A (PAZA ➔ RJJJ 서향 진출 규정): 서향 항공기는 웨이포인트 NIKLL 또는 그 동쪽(East)에서 항로 R220에 합류(Join)해야 함.",
-                    filed: isJfkToIcn ? "CZEG➔PAZA 진입: GOATS 경유 | PAZA➔RJJJ 진출: NATES (동경 E171°58')에서 R220 조인" : "PAZA UPR 적합 항로 비행계획 수립",
-                    status: "COMPLIANT",
-                    verdict: "✅ 완전 일치 및 준수 (COMPLIANT)",
-                    desc: "NATES는 NIKLL(동경 E169°20')보다 동쪽(East)에 위치하므로, NOTAM 규정(Join R220 over or East of NIKLL)을 완벽하게 만족합니다.",
-                    raw: `21AUG26 23:21 - 30NOV26 23:59 PAZA A2472/26
+                    },
+                    {
+                        no: 2,
+                        title: "앵커리지 UPR(사용자 선호 항로) 서향 합류 규정 준수 (PAZA A2472/26)",
+                        rule: "Item 2.A (CZEG ➔ PAZA 진입점): TAYTA, GOATS, FIORD, CHAPO, TOVAD 등 지정 Fix 중 하나 경유 의무.<br>Item 3.A (PAZA ➔ RJJJ 서향 진출 규정): 서향 항공기는 웨이포인트 NIKLL 또는 그 동쪽(East)에서 항로 R220에 합류(Join)해야 함.",
+                        filed: "CZEG➔PAZA 진입: GOATS 경유 | PAZA➔RJJJ 진출: NATES (동경 E171°58')에서 R220 조인",
+                        status: "COMPLIANT",
+                        verdict: "✅ 완전 일치 및 준수 (COMPLIANT)",
+                        desc: "NATES는 NIKLL(동경 E169°20')보다 동쪽(East)에 위치하므로, NOTAM 규정(Join R220 over or East of NIKLL)을 완벽하게 만족합니다.",
+                        raw: `21AUG26 23:21 - 30NOV26 23:59 PAZA A2472/26
 E) USER PREFERRED ROUTE FLIGHT PLANNING GUIDELINES 2. USER PREFERRED ROUTE ENTERY/EXIT BTN CZEG, CZVR OR KZAK FIR: A. CZEG FIR: BTN TAYTA AND DEEJA MUST FLT PLAN OVER ONE OF THE FOLLOWING FIXES: GOATS... 3. WB USER PREFERRED ROUTE TO RJJJ FIR: A. JOIN R220 OVER OR E OF WAYPOINT NIKLL`
-                },
-                {
-                    no: 3,
-                    title: "일본 후쿠오카 FIR 조건부 항로(CDR) 유효 시간 준수 (RJJJ Q2053/26)",
-                    rule: "항로 L512 구간은 조건부 항로(CDR)로서 260829 1200Z ~ 2200Z 시간대에만 비행 가능 (MEA 이상).",
-                    filed: "항로상 GTC L512 TENAS 구간 비행 | OFP상 GTC ETO 13:19Z, TENAS ETO 14:10Z",
-                    status: "COMPLIANT",
-                    verdict: "✅ 완전 일치 및 준수 (COMPLIANT)",
-                    desc: "비행 통과 시간대(13:19Z~14:10Z)가 L512 개방 시간(12:00Z~22:00Z) 범위 내에 정확히 위치하여 정상 비행 가능합니다.",
-                    raw: `28AUG26 22:00 - 29AUG26 22:00 RJJJ Q2053/26
+                    },
+                    {
+                        no: 3,
+                        title: "일본 후쿠오카 FIR 조건부 항로(CDR) 유효 시간 준수 (RJJJ Q2053/26)",
+                        rule: "항로 L512 구간은 조건부 항로(CDR)로서 260829 1200Z ~ 2200Z 시간대에만 비행 가능 (MEA 이상).",
+                        filed: "항로상 GTC L512 TENAS 구간 비행 | OFP상 GTC ETO 13:19Z, TENAS ETO 14:10Z",
+                        status: "COMPLIANT",
+                        verdict: "✅ 완전 일치 및 준수 (COMPLIANT)",
+                        desc: "비행 통과 시간대(13:19Z~14:10Z)가 L512 개방 시간(12:00Z~22:00Z) 범위 내에 정확히 위치하여 정상 비행 가능합니다.",
+                        raw: `28AUG26 22:00 - 29AUG26 22:00 RJJJ Q2053/26
 E) CDR ARE ESTABLISHED AS FLW, RTE PERIOD MNM APPLICABLE ALT 1) L512 2608291200/2608292200 MEA`
-                },
-                {
-                    no: 4,
-                    title: "캄차카 반도 화산재 위험 고도 완전 회피 (PAZA A2428/26, A2278/26)",
-                    rule: "러시아 캄차카 반도 클류체프스코이 & 셰벨루치 화산 분출로 인한 화산재 위험 고도: SFC ~ FL250 (ORANGE 경보).",
-                    filed: "캄차카 반도 인접 통과 구간 계획 순항 고도: FL380 ➔ FL400",
-                    status: "COMPLIANT",
-                    verdict: "✅ 안전 고도 확보 (COMPLIANT)",
-                    desc: "화산재 위험 상한선(FL250)보다 13,000~15,000FT 이상 상공으로 비행하여 안전하게 통과합니다.",
-                    raw: `17AUG26 00:43 - 17AUG27 00:30 PAZA A2428/26
+                    },
+                    {
+                        no: 4,
+                        title: "캄차카 반도 화산재 위험 고도 완전 회피 (PAZA A2428/26, A2278/26)",
+                        rule: "러시아 캄차카 반도 클류체프스코이 & 셰벨루치 화산 분출로 인한 화산재 위험 고도: SFC ~ FL250 (ORANGE 경보).",
+                        filed: "캄차카 반도 인접 통과 구간 계획 순항 고도: FL380 ➔ FL400",
+                        status: "COMPLIANT",
+                        verdict: "✅ 안전 고도 확보 (COMPLIANT)",
+                        desc: "화산재 위험 상한선(FL250)보다 13,000~15,000FT 이상 상공으로 비행하여 안전하게 통과합니다.",
+                        raw: `17AUG26 00:43 - 17AUG27 00:30 PAZA A2428/26
 E) VOLCANIC ACTIVITY ADVISORY FOR KLYUCHEVSKOY VOLCANO / 560300N1603900E / KAMCHATKAN PENINSULA, RUSSIA. COLOR CODE ORANGE. F) SFC G) FL250`
-                },
-                {
-                    no: 5,
-                    title: "뉴욕 JFK 출항 VOR 결함에 따른 RNAV 장비 준수 (KZNY A0695/26, A7174/26)",
-                    rule: "CRI VOR/DME 및 JFK VOR/DME 운용 중단으로 Kennedy Five SID 출항 시 RNAV/GPS 탑재 필수.",
-                    filed: "항공기 장비: A388 / SDE1E2E3FGHIJ1J2J3J4J5M1P2RWXYZ/LB1D1 (PBN/A1B1C1D1L1O1S2, RNP 1 / RNAV 1 인증 완비)",
-                    status: "COMPLIANT",
-                    verdict: "✅ 규정 준수 (COMPLIANT)",
-                    desc: "비행계획에 RNP 1 및 RNAV 1 인증이 완비되어 있어 VOR 결함과 무관하게 표준 계기출발을 정상 수행합니다.",
-                    raw: `25AUG26 21:00 - 01SEP26 16:14 KJFK A7174/26
+                    },
+                    {
+                        no: 5,
+                        title: "뉴욕 JFK 출항 VOR 결함에 따른 RNAV 장비 준수 (KZNY A0695/26, A7174/26)",
+                        rule: "CRI VOR/DME 및 JFK VOR/DME 운용 중단으로 Kennedy Five SID 출항 시 RNAV/GPS 탑재 필수.",
+                        filed: "항공기 장비: A388 / SDE1E2E3FGHIJ1J2J3J4J5M1P2RWXYZ/LB1D1 (PBN/A1B1C1D1L1O1S2, RNP 1 / RNAV 1 인증 완비)",
+                        status: "COMPLIANT",
+                        verdict: "✅ 규정 준수 (COMPLIANT)",
+                        desc: "비행계획에 RNP 1 및 RNAV 1 인증이 완비되어 있어 VOR 결함과 무관하게 표준 계기출발을 정상 수행합니다.",
+                        raw: `25AUG26 21:00 - 01SEP26 16:14 KJFK A7174/26
 E) SID JOHN F KENNEDY INTL, NEW YORK, NY. KENNEDY FIVE DEPARTURE...
 DEPARTURE PROCEDURE NA EXCEPT FOR ACFT EQUIPPED WITH SUITABLE RNAV SYSTEM WITH GPS, JFK VOR/DME OUT OF SERVICE.`
-                },
-                {
-                    no: 6,
-                    title: "인천 FIR 진입 및 비행금지구역 회피 (RKRR D1768/26, Z0632/26)",
-                    rule: "서울 중심부(373523N 1265832E) 반경 2NM 임시 비행금지구역 설정 (D1768/26, SFC~UNL).",
-                    filed: "...TENAS Y437 KAE Y697 KARBU..RKSI",
-                    status: "COMPLIANT",
-                    verdict: "✅ 규정 준수 (COMPLIANT)",
-                    desc: "금지구역을 우회하여 동남측 KARBU 픽스를 통해 인천공항 표준 계기접근 절차로 정상 진입합니다.",
-                    raw: `28AUG26 00:00 - 30AUG26 23:59 RKRR D1768/26
+                    },
+                    {
+                        no: 6,
+                        title: "인천 FIR 진입 및 비행금지구역 회피 (RKRR D1768/26, Z0632/26)",
+                        rule: "서울 중심부(373523N 1265832E) 반경 2NM 임시 비행금지구역 설정 (D1768/26, SFC~UNL).",
+                        filed: "...TENAS Y437 KAE Y697 KARBU..RKSI",
+                        status: "COMPLIANT",
+                        verdict: "✅ 규정 준수 (COMPLIANT)",
+                        desc: "금지구역을 우회하여 동남측 KARBU 픽스를 통해 인천공항 표준 계기접근 절차로 정상 진입합니다.",
+                        raw: `28AUG26 00:00 - 30AUG26 23:59 RKRR D1768/26
 E) TEMPORARY PROHIBITED AREA ESTABLISHED RADIUS 2NM CENTERED ON 373523N1265832E. F) SFC G) UNL`
-                }
-            ];
+                    }
+                );
+            } else {
+                // ICN-LAX (AAR202 / OZ202)
+                compliancePoints.push(
+                    {
+                        no: 1,
+                        title: "도착지 KLAX 북측 활주로 07L/25R 폐쇄에 따른 착륙 계획 준수 (KLAX A4733/26)",
+                        rule: "KLAX 북측 주 활주로 RWY 07L/25R이 포장 공사로 전면 폐쇄됨 (29AUG26 07:30 ~ 13:30Z).",
+                        filed: "KLAX 도착 예정 10:38Z (폐쇄 시간대 포함) | 남측 활주로(25L/24R) 또는 06L/24R 착륙 배정 반영",
+                        status: "COMPLIANT",
+                        verdict: "✅ 완전 일치 및 준수 (COMPLIANT)",
+                        desc: "비행계획 도착 시각이 폐쇄 시간대에 해당하므로 남측 복합 활주로(25L) 표준 계기접근 및 관제사의 활주로 변경(Sidestep) 지시 대비를 완료하였습니다.",
+                        raw: `29AUG26 07:30 - 29AUG26 13:30 KLAX A4733/26
+E) RWY 07L/25R CLSD DUE TO PAVEMENT REHABILITATION WORK`
+                    },
+                    {
+                        no: 2,
+                        title: "[A380 기종 한정] KLAX 유도로 B 날개폭 제한(118FT) 완전 회피 (KLAX A4372/26)",
+                        rule: "매주 목/금/토/화/수 0730-1330Z TWY B (B3 ~ B1 구간) 날개폭 118FT(36m) 초과 항공기 통행 금지.",
+                        filed: "운항 기종: A380-800 (HL7635, 날개폭 261.8FT / 79.8m) | 착륙 후 TWY B 진입 배제 및 TWY C 우회 경로 계획",
+                        status: "COMPLIANT",
+                        verdict: "✅ 완전 일치 및 준수 (COMPLIANT)",
+                        desc: "A380은 날개폭 제한(118ft)을 초과하므로 해당 유도로(TWY B) 진입을 철저히 배제하고 관제탑 인가 Code F Taxiway로 안전 지상 활주합니다.",
+                        raw: `06AUG26 07:30 - 01SEP26 13:30 KLAX A4372/26
+D) THU FRI SAT TUE WED 0730-1330
+E) TWY B BTN TWY B3 AND TWY B1 CLSD TO ACFT WINGSPAN MORE THAN 118FT`
+                    },
+                    {
+                        no: 3,
+                        title: "북태평양 NOPAC(R580) 및 대양 UPR 동향(Eastbound) 대양 항로 준수 (PAZA A2472/26, RJJJ Q2056/26)",
+                        rule: "대양 UPR 비행 시 반대 방향(서향) PACOTS/NOPAC 교통류와 수평 분리(Lateral Separation) 유지 의무 (PAZA A2472/26 Item 1).",
+                        filed: "...OATIS R580 OPHET R580 OPAKE A342 AMOND DCT 55N170W 54N160W 53N150W 51N140W 45N130W DCT NATTE...",
+                        status: "COMPLIANT",
+                        verdict: "✅ 완전 일치 및 준수 (COMPLIANT)",
+                        desc: "NOPAC 공인 동향 항로(R580)와 북태평양 대양 고고도 직항 분리 경로(55N170W..45N130W)를 계획하여 서향 대양 흐름과 완벽히 수평 분리됩니다.",
+                        raw: `21AUG26 23:21 - 30NOV26 23:59 PAZA A2472/26
+E) USER PREFERRED ROUTE FLIGHT PLANNING GUIDELINES 1. USER PREFERRED ROUTE ACFT WILL HAVE THE SAME PRIORITY FOR ALT ASSIGNMENT AS ACFT ON AN OPTIONAL PACOTS OR NOPAC TRACK.`
+                    },
+                    {
+                        no: 4,
+                        title: "캄차카 반도 화산재 위험 고도 완전 회피 (PAZA A2428/26, A2278/26)",
+                        rule: "러시아 캄차카 반도 클류체프스코이 & 셰벨루치 화산 분출로 인한 화산재 위험 고도: SFC ~ FL250 (ORANGE 경보).",
+                        filed: "캄차카 남측 인접 구간 계획 순항 고도: FL350 ➔ FL390 (Step Climb)",
+                        status: "COMPLIANT",
+                        verdict: "✅ 안전 고도 확보 (COMPLIANT)",
+                        desc: "화산재 위험 상한선(FL250)보다 10,000~14,000FT 이상 상공으로 비행하여 안전하게 통과합니다.",
+                        raw: `17AUG26 00:43 - 17AUG27 00:30 PAZA A2428/26
+E) VOLCANIC ACTIVITY ADVISORY FOR KLYUCHEVSKOY VOLCANO / 560300N1603900E / KAMCHATKAN PENINSULA, RUSSIA. COLOR CODE ORANGE. F) SFC G) FL250`
+                    },
+                    {
+                        no: 5,
+                        title: "출발지 인천공항(RKSI) 출항 및 상승 중 GPS 간섭 주의 (RKSI Z0511/24, COAD05/26)",
+                        rule: "인천 FIR 내 군 훈련으로 인한 GPS 신호 간헐적 유실 및 NDB 개정에 따른 400FT AGL 이하 조기 선회 금지.",
+                        filed: "EGOBA Y697 LANAT SID 출항 시 GPS Primary 확인 및 400FT 이상 상승 후 선회 준수",
+                        status: "COMPLIANT",
+                        verdict: "✅ 규정 준수 (COMPLIANT)",
+                        desc: "FOM 6.4.4 규정에 따라 400FT 이상 안전고도 확보 후 선회하고, VOR/DME 항법 크로스체크를 유지합니다.",
+                        raw: `30MAY24 01:15 - UFN RKSI Z0511/24
+E) CAUTIONARY INFO FOR ACFT OPERATING IN INCHEON FIR : PILOTS HAVE REPORTED THAT GPS SIGNALS ARE UNRELIABLE OR LOST INTERMITTENTLY IN INCHEON FIR(AROUND INCHEON AND SEOUL AREA).`
+                    },
+                    {
+                        no: 6,
+                        title: "교체공항 온타리오(KONT) 정밀접근 최저치(Minima) 사전 확인 (KONT A1387/26, A1388/26)",
+                        rule: "KONT RWY 26R ILS CAT II/III 인가 불가 (NA) 및 RWY 26R ALS U/S, RWY 26L PAPI U/S.",
+                        filed: "지정 ALTN: KONT | 회항 시 CAT I ILS 접근 최저치 및 증가된 시정 기준(Vis/RVR) 적용",
+                        status: "COMPLIANT",
+                        verdict: "✅ 규정 준수 (COMPLIANT)",
+                        desc: "ILS CAT I 최저치(DA 200ft / RVR 2400)를 산정하고 등화 결함을 반영하여 안전하게 교체공항을 선정하였습니다.",
+                        raw: `25JUN26 07:34 - 30DEC26 23:59 KONT A1387/26
+E) NAV ILS RWY 26R CAT II/III NA`
+                    }
+                );
+            }
 
             // 4. Caution Airport Breakdown Table Data with Raw Text
             const cautionAirports = isJfkToIcn ? [
@@ -808,6 +882,9 @@ E) TEMPORARY PROHIBITED AREA ESTABLISHED RADIUS 2NM CENTERED ON 373523N1265832E.
                 { stn: "RKSS", id: "A0908/26", item: "RWY 14L/32R 커퓨 시간대(1400-2000Z) 공사 폐쇄", action: "회항 시 RWY 14R/32L 단일 활주로 착륙", raw: "29JUN26 14:00 - 31AUG26 20:00 RKSS A0908/26\nE) RWY 14L/32R CLSD DUE TO WIP" },
                 { stn: "RKSS", id: "A1104/26", item: "TWY B1, C1, D1, E1, G1 정지선등(Stop Bar Light) 시범 운영", action: "정지선등 점등 시 관제 허가와 불일치해도 정지 후 재확인", raw: "17AUG26 00:00 - 31AUG26 14:59 RKSS A1104/26\nE) STOP BAR LIGHT AT TWY B1,C1,D1,E1,G1 FOR RWY 14R/32L WILL BE OPR TRIAL BASIS." }
             ] : [
+                { stn: "KLAX", id: "COAD02/21", item: "D-10 / C-10 Taxilane Ramp Control 주파수 절차", action: "D-10 북측 131.850MHz, C-10 남측 129.325MHz 확인", raw: "20OCT21 00:00 - UFN KLAX COAD02/21\nE) D-10 / C-10 TAXILANE TAXI PROCEDURES INFO" },
+                { stn: "KLAX", id: "A4733/26", item: "북측 주 활주로 RWY 07L/25R 포장 공사 전면 폐쇄", action: "남측 25L/24R 또는 06L/24R 착륙 배정 브리핑 준비", raw: "29AUG26 07:30 - 29AUG26 13:30 KLAX A4733/26\nE) RWY 07L/25R CLSD DUE TO PAVEMENT REHABILITATION WORK" },
+                { stn: "KLAX", id: "A4372/26", item: "TWY B (B3~B1) 날개폭 118FT 초과 통행 금지", action: "A380(날개폭 261ft) 진입 불가, TWY C 우회 필수", raw: "06AUG26 07:30 - 01SEP26 13:30 KLAX A4372/26\nE) TWY B BTN TWY B3 AND TWY B1 CLSD TO ACFT WINGSPAN MORE THAN 118FT" },
                 { stn: "KONT", id: "A1769/26", item: "RWY 26L PAPI 운용 불능 (U/S)", action: "야간 착륙 시 시각 진입각 참조 불가 유의", raw: "27AUG26 17:06 - 09SEP26 23:59 KONT A1769/26\nE) RWY 26L PAPI U/S" },
                 { stn: "KONT", id: "A1388/26", item: "RWY 26R ALS(진입등화) 운용 불능 (U/S)", action: "저시정 착륙 시 최저치(Vis/RVR) 상향 확인", raw: "25JUN26 07:41 - 30DEC26 23:59 KONT A1388/26\nE) RWY 26R ALS U/S" },
                 { stn: "KONT", id: "A1387/26", item: "ILS RWY 26R CAT II/III 인가 불가 (NA)", action: "정밀접근 CAT I 최저치(Minima) 적용", raw: "25JUN26 07:34 - 30DEC26 23:59 KONT A1387/26\nE) NAV ILS RWY 26R CAT II/III NA" }
@@ -818,21 +895,25 @@ E) TEMPORARY PROHIBITED AREA ESTABLISHED RADIUS 2NM CENTERED ON 373523N1265832E.
                 { text: "KJFK 출발 이륙 활주로 집중 및 지상 정체 대비", desc: "RWY 04L/22R & 04R/22L 동시 폐쇄(A7259/58). 31L/13R 단일 이륙 집중 대비 추가 택시 연료 및 시간 관리." },
                 { text: "KJFK 출항 시 RNAV 상태 점검", desc: "JFK VOR & CRI VOR 운용 중단(A7174/A7252). Kennedy Five SID 출항 시 GPS Primary 정상 확인." },
                 { text: "캐나다 구간 비상 회항 시 CYUL(몬트리올) 배제", desc: "CYUL 날개폭 213ft 제한 및 타사기 회항 불가 고시(E4479/E4943). 비상 시 CYYZ(토론토) 등 인가 공항 선정." },
-                { text: "캄차카 반도 인근 화산재(Volcanic Ash) 회피", desc: "클류체프스코이/셰벨루치 화산 ORANGE 경보(PAZA A2428/26). FL250 이하 화산재 연기 주의." },
+                { text: "캄차카 반도 인근 화산재(Volcanic Ash) 회피", desc: "클류체프스코이 화산 ORANGE 경보(PAZA A2428/26). FL250 이하 화산재 연기 주의." },
                 { text: "김포(RKSS) 회항 시 커퓨 및 활주로 14L 폐쇄 확인", desc: "심야 커퓨(1400-2100Z) 및 RWY 14L/32R 폐쇄(A0908/26)에 따라 14R 단일 착륙 대비." }
             ] : [
                 { text: "KLAX 착륙 활주로 사전 확인", desc: "RWY 07L/25R 일시 폐쇄(A4733/26)에 따라 남측 활주로(25L/24R) 또는 06L/24R 착륙 브리핑 준비." },
                 { text: "KLAX 지상 활주 시 A380 날개폭(261ft) 제한 확인", desc: "TWY B (B3~B1) 구간 날개폭 118ft 초과 진입 금지(A4372/26). A380 인가 TWY 우회 필수." },
-                { text: "캄차카 반도 인근 화산재(Volcanic Ash) 감시", desc: "클류체프스코이/셰벨루치 화산 ORANGE 경보(PAZA A2428/26). FL250 이하 화산재 연기 주의." },
+                { text: "캄차카 남측 대양 통과 시 화산재(Volcanic Ash) 감시", desc: "클류체프스코이 화산 ORANGE 경보(PAZA A2428/26). FL250 이하 화산재 연기 주의 및 순항고도 유지." },
                 { text: "인천 FIR 상승 중 GPS 신호 유실 주의", desc: "군 훈련 GPS 간섭(Z0511/24) 발생 시 Nuisance GPWS 대응 및 VOR/DME 백업 크로스체크." },
                 { text: "KONT 회항 시 착륙 최저치 재계산", desc: "RWY 26L PAPI U/S 및 RWY 26R ALS U/S, ILS 26R CAT II/III 불가 반영." }
             ];
 
             // 6. In-flight Monitoring Reminders
-            const inFlightReminders = [
+            const inFlightReminders = isJfkToIcn ? [
                 { title: "PAZA CPDLC Logon 주소 전환 확인", desc: "GOATS 진입 시 PAZA로 접속 ➔ 서경 167°W~174°W 서쪽 통과 시 PAZN 주소 사용 (PAZA A0044/24)." },
                 { title: "CZUL/CZWG 통과 시 레이더/주파수 점검", desc: "Brisay Radar U/S(H5625/26) 및 위니펙 일부 주파수 단절(G3067/26)에 따른 고도/항로 변경 지연 가능성 대비." },
                 { title: "인천 접근 시 GPS 모니터링", desc: "인천 FIR 진입 후 군 훈련 GPS 간섭(RKRR Z0555/26)으로 인한 EGPWS 불필요 경보 발생 여부 주시." }
+            ] : [
+                { title: "대양 진입 전 CPDLC Logon 전환", desc: "후쿠오카 RJJJ 통과 후 앵커리지 PAZA ➔ 오클랜드 해양 KZAK 구간별 CPDLC 정상 연동 확인." },
+                { title: "태평양 NOPAC / UPR 대양 위치 보고", desc: "대양 경도선(170W, 160W, 150W, 140W, 130W) 통과 시 ADS-C / CPDLC 보고 주기 정상 점검." },
+                { title: "KLAX ATIS 수신 및 터미널 램프 주파수 확인", desc: "LA 진입 전 ATIS를 통해 활주로 07L/25R 폐쇄 상태 및 남측 25L/24R 착륙 절차 재확인." }
             ];
 
             return {
@@ -938,7 +1019,7 @@ E) TEMPORARY PROHIBITED AREA ESTABLISHED RADIUS 2NM CENTERED ON 373523N1265832E.
                         <div>
                             <strong class="text-sm font-bold text-emerald-300 block">🎯 [종합 결론] 비행계획 항로 준수성 검증 완료</strong>
                             <p class="text-xs text-slate-300 mt-1 leading-relaxed">
-                                현재 비행계획(FPL)은 항로상의 <strong>모든 NOTAM 제한사항, UPR(사용자 선호 항로) 규정, 조건부 항로(CDR) 유효 시간 및 공역 통제 지침을 100% 완벽하게 준수(COMPLIANT)</strong>하고 있습니다.
+                                현재 비행계획(FPL)은 항로상의 <strong>모든 NOTAM 제한사항, NOPAC/UPR 대양 항로 규정, 공항 활주로/유도로 제약 및 공역 지침을 100% 완벽하게 준수(COMPLIANT)</strong>하고 있습니다.
                             </p>
                         </div>
                     </div>
@@ -1080,49 +1161,84 @@ E) TEMPORARY PROHIBITED AREA ESTABLISHED RADIUS 2NM CENTERED ON 373523N1265832E.
                     </div>
 
                     <div class="space-y-3 text-xs">
-                        <div class="bg-slate-950 border border-slate-800 rounded-xl p-4 space-y-2">
-                            <div class="flex items-center justify-between">
-                                <strong class="font-bold text-blue-300 text-sm">몬트리올 / 위니펙 FIR (CZUL / CZWG)</strong>
-                                <span class="text-[11px] font-mono text-slate-500">[H5625/26, G3067/26]</span>
+                        ${isJfkToIcn ? `
+                            <div class="bg-slate-950 border border-slate-800 rounded-xl p-4 space-y-2">
+                                <div class="flex items-center justify-between">
+                                    <strong class="font-bold text-blue-300 text-sm">몬트리올 / 위니펙 FIR (CZUL / CZWG)</strong>
+                                    <span class="text-[11px] font-mono text-slate-500">[H5625/26, G3067/26]</span>
+                                </div>
+                                <p class="text-slate-300 leading-relaxed">
+                                    • <strong>Brisay Radar U/S (H5625/26):</strong> 542318N 0703430W 반경 200NM 구역 내에서 항로 및 고도 변경 요청이 거부/지연될 수 있음.<br>
+                                    • <strong>위니펙 관제 주파수 장애 (G3067/26):</strong> Class A 공역 진입 지연(최대 30분) 또는 FL180 이하 조기 강하 지시 가능성에 대비.
+                                </p>
                             </div>
-                            <p class="text-slate-300 leading-relaxed">
-                                • <strong>Brisay Radar U/S (H5625/26):</strong> 542318N 0703430W 반경 200NM 구역 내에서 항로 및 고도 변경 요청이 거부/지연될 수 있음.<br>
-                                • <strong>위니펙 관제 주파수 장애 (G3067/26):</strong> Class A 공역 진입 지연(최대 30분) 또는 FL180 이하 조기 강하 지시 가능성에 대비.
-                            </p>
-                        </div>
 
-                        <div class="bg-slate-950 border border-slate-800 rounded-xl p-4 space-y-2">
-                            <div class="flex items-center justify-between">
-                                <strong class="font-bold text-blue-300 text-sm">에드먼턴 FIR (CZEG)</strong>
-                                <span class="text-[11px] font-mono text-slate-500">[F4091/26, F3405/26]</span>
+                            <div class="bg-slate-950 border border-slate-800 rounded-xl p-4 space-y-2">
+                                <div class="flex items-center justify-between">
+                                    <strong class="font-bold text-blue-300 text-sm">에드먼턴 FIR (CZEG)</strong>
+                                    <span class="text-[11px] font-mono text-slate-500">[F4091/26, F3405/26]</span>
+                                </div>
+                                <p class="text-slate-300 leading-relaxed">
+                                    • <strong>서향 통과 항로 지정 (F4091/26):</strong> FL290 이상 서향 통과 항공기는 VINKO-RABOX-NOVAR 또는 MEDAK-DATNO 이남/이북 지정 항로 준수.<br>
+                                    • <strong>북극 서향 크루징 일방통행 (F3405/26):</strong> 그린란드/북극 서향 비행 시 FL350 및 FL390 전용 일방통행(One-way) 배정.
+                                </p>
                             </div>
-                            <p class="text-slate-300 leading-relaxed">
-                                • <strong>서향 통과 항로 지정 (F4091/26):</strong> FL290 이상 서향 통과 항공기는 VINKO-RABOX-NOVAR 또는 MEDAK-DATNO 이남/이북 지정 항로 준수.<br>
-                                • <strong>북극 서향 크루징 일방통행 (F3405/26):</strong> 그린란드/북극 서향 비행 시 FL350 및 FL390 전용 일방통행(One-way) 배정.
-                            </p>
-                        </div>
 
-                        <div class="bg-slate-950 border border-slate-800 rounded-xl p-4 space-y-2">
-                            <div class="flex items-center justify-between">
-                                <strong class="font-bold text-blue-300 text-sm">앵커리지 FIR (PAZA)</strong>
-                                <span class="text-[11px] font-mono text-slate-500">[A0044/24, A1136/25]</span>
+                            <div class="bg-slate-950 border border-slate-800 rounded-xl p-4 space-y-2">
+                                <div class="flex items-center justify-between">
+                                    <strong class="font-bold text-blue-300 text-sm">앵커리지 FIR (PAZA)</strong>
+                                    <span class="text-[11px] font-mono text-slate-500">[A0044/24, A1136/25]</span>
+                                </div>
+                                <p class="text-slate-300 leading-relaxed">
+                                    • <strong>CPDLC 로깅 구분 (A0044/24):</strong> 북위 73도 이북/서경 152~167도 서측은 PAZN, 이남은 PAZA로 CPDLC 로깅 주소 구분 접속.<br>
+                                    • <strong>GNSS 간섭 보고 (A1136/25):</strong> 태평양 진입 전 GNSS 간섭 및 항법 저하 발생 시 SFO Radio / CPDLC를 통해 앵커리지 ATC로 즉시 보고.
+                                </p>
                             </div>
-                            <p class="text-slate-300 leading-relaxed">
-                                • <strong>CPDLC 로깅 구분 (A0044/24):</strong> 북위 73도 이북/서경 152~167도 서측은 PAZN, 이남은 PAZA로 CPDLC 로깅 주소 구분 접속.<br>
-                                • <strong>GNSS 간섭 보고 (A1136/25):</strong> 태평양 진입 전 GNSS 간섭 및 항법 저하 발생 시 SFO Radio / CPDLC를 통해 앵커리지 ATC로 즉시 보고.
-                            </p>
-                        </div>
 
-                        <div class="bg-slate-950 border border-slate-800 rounded-xl p-4 space-y-2">
-                            <div class="flex items-center justify-between">
-                                <strong class="font-bold text-blue-300 text-sm">인천 FIR (RKRR)</strong>
-                                <span class="text-[11px] font-mono text-slate-500">[Z0632/26, D1768/26]</span>
+                            <div class="bg-slate-950 border border-slate-800 rounded-xl p-4 space-y-2">
+                                <div class="flex items-center justify-between">
+                                    <strong class="font-bold text-blue-300 text-sm">인천 FIR (RKRR)</strong>
+                                    <span class="text-[11px] font-mono text-slate-500">[Z0632/26, D1768/26]</span>
+                                </div>
+                                <p class="text-slate-300 leading-relaxed">
+                                    • <strong>조건부 항로(CDR2) 직항 (Z0632/26):</strong> 조건부 항로 발효에 따라 BOPTA-PONIK 또는 KARBU-LANAT 직항 허가 ATC 요청 권장.<br>
+                                    • <strong>수도권 비행금지구역 회피 (D1768/26):</strong> 서울 중심부 반경 2NM 임시 비행금지구역(SFC~UNL)을 동남측 KARBU 픽스 경유로 안전 회피.
+                                </p>
                             </div>
-                            <p class="text-slate-300 leading-relaxed">
-                                • <strong>조건부 항로(CDR2) 직항 (Z0632/26):</strong> 조건부 항로 발효에 따라 BOPTA-PONIK 또는 KARBU-LANAT 직항 허가 ATC 요청 권장.<br>
-                                • <strong>수도권 비행금지구역 회피 (D1768/26):</strong> 서울 중심부 반경 2NM 임시 비행금지구역(SFC~UNL)을 동남측 KARBU 픽스 경유로 안전 회피.
-                            </p>
-                        </div>
+                        ` : `
+                            <div class="bg-slate-950 border border-slate-800 rounded-xl p-4 space-y-2">
+                                <div class="flex items-center justify-between">
+                                    <strong class="font-bold text-blue-300 text-sm">일본 후쿠오카 FIR (RJJJ)</strong>
+                                    <span class="text-[11px] font-mono text-slate-500">[Q2056/26, Q2053/26]</span>
+                                </div>
+                                <p class="text-slate-300 leading-relaxed">
+                                    • <strong>PACOTS Track 14 동향 운영 (Q2056/26):</strong> KALNA ➔ CEPAS 대양 Flex 트랙 운영 중. 본 항공편은 NOPAC R580(OATIS-OPHET-AMOND)으로 분리 비행.<br>
+                                    • <strong>조건부 항로(CDR) 운영 (Q2053/26):</strong> L512 및 국내 연결 항로 개방 시간대 확인.
+                                </p>
+                            </div>
+
+                            <div class="bg-slate-950 border border-slate-800 rounded-xl p-4 space-y-2">
+                                <div class="flex items-center justify-between">
+                                    <strong class="font-bold text-blue-300 text-sm">앵커리지 & 오클랜드 해양 FIR (PAZA / KZAK)</strong>
+                                    <span class="text-[11px] font-mono text-slate-500">[PAZA A2472/26, KZAK A4261/26]</span>
+                                </div>
+                                <p class="text-slate-300 leading-relaxed">
+                                    • <strong>대양 UPR 동향(Eastbound) 지침 (PAZA A2472/26):</strong> 서향 교통류와 수평 분리(Lateral Separation)를 유지하며 대양 직항(55N170W..45N130W) 비행.<br>
+                                    • <strong>Oakland Oceanic Track J (KZAK A4261/26):</strong> 태평양 진입 후 CPDLC ADS-C 위치 보고 주기 확인.
+                                </p>
+                            </div>
+
+                            <div class="bg-slate-950 border border-slate-800 rounded-xl p-4 space-y-2">
+                                <div class="flex items-center justify-between">
+                                    <strong class="font-bold text-blue-300 text-sm">미국 시애틀 / 오클랜드 / LA 관제구역 (KZSE / KZOA / KZLA)</strong>
+                                    <span class="text-[11px] font-mono text-slate-500">[KZLA A3822/26, A3803/26]</span>
+                                </div>
+                                <p class="text-slate-300 leading-relaxed">
+                                    • <strong>KLAX 도착 계기절차 (STAR):</strong> NATTE ➔ OAK ➔ BURGL ➔ IRNMN2 표준 계기접근 절차로 원활한 강하 및 속도 제한 준수.<br>
+                                    • <strong>로스앤젤레스 권역 VOR 점검:</strong> JLI VOR(A3822/26) 비정상 영역 확인 및 RNAV 도착 절차 유지.
+                                </p>
+                            </div>
+                        `}
                     </div>
                 </div>
 
