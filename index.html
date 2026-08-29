@@ -556,14 +556,20 @@
                 // text layer left in between comes with it. Page furniture is
                 // never part of a NOTAM - drop it outright.
                 rawBlock = rawBlock
-                    .replace(/^[ \t]*---[ \t]*\[PAGE \d+\/\d+\][ \t]*---[ \t]*$/gm, "")
-                    .replace(/^[ \t]*Page \d+[ \t]*$/gm, "");
+                    .replace(/-{2,}\s*\[PAGE\s*\d+\s*\/\s*\d+\s*\]\s*-{2,}/g, "")
+                    // Mixed case is the discriminator: NOTAM text is upper case,
+                    // so "Page 84" is the PDF footer while "PAGE 12" is content.
+                    .replace(/\bPage\s+\d+\b/g, "");
 
                 // The last NOTAM before the flight plan section swallowed the
                 // whole OFP: RKRR Z0390/26 was six lines carrying 24,973
                 // characters. Cut at the first line that opens one of those
                 // documents - none of them can begin a NOTAM.
-                const docIdx = rawBlock.search(/^[ \t]*(?:CFP PLAN|FLIGHT RELEASE |REFILE FLT PLAN)/m);
+                // Whitespace-tolerant and not anchored to a line start: pdf.js
+                // reflows these headers unpredictably. None of these phrases can
+                // open a NOTAM, so finding one anywhere but position 0 ends it.
+                const docIdx = rawBlock.search(
+                    /(?:CFP\s+PLAN|FLIGHT\s+RELEASE|REFILE\s+FLT\s+PLAN|END\s+OF\s+JEPPESEN|START\s+OF\s+WIND\s+AND\s+TEMPERATURE)/);
                 if (docIdx > 0) {
                     rawBlock = rawBlock.slice(0, docIdx);
                 }
