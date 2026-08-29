@@ -941,6 +941,9 @@
             "EMERG", "GLOWS", "CREWS", "WHILE", "ALERT", "COLOR", "TABLE", "HOTEL",
             "AIRAC", "ARTCC", "FICON", "TACAN", "CPDLC", "SEOUL", "LOGAN", "LOWER",
             "UPPER", "TOTAL", "VALID", "UNTIL", "ABOVE", "BELOW", "LOCAL", "FINAL",
+            "WHICH", "NOPAC", "HOURS", "FILED", "NAMED", "REFER", "OCEAN", "EMAIL",
+            "PHONE", "SMALL", "DAILY", "POINT", "DARTS", "TRAIL", "USERS", "LOVES",
+            "GUYED", "SEALS", "EAGLE", "EGRET", "MALAY",
             "LIMIT", "AREAS", "ZONES", "LEVEL", "NIGHT", "START", "CHECK", "GROUP",
             "PHASE", "STAGE", "ORDER", "RULES", "MERIT", "FLIPS"]);
 
@@ -1119,19 +1122,21 @@
 
             const strong = [];
             const weak = [];
+            const hitFixes = [], hitAirways = [], hitPoints = [];
             const routeLines = new Set();
-            const collect = (set, bucket, keepLine) => {
+            const collect = (set, bucket, category, keepLine) => {
                 set.forEach((t) => {
                     const i = lineOf(t);
                     if (i < 0) return;
                     bucket.push(t);
+                    if (category) category.push(t);
                     if (keepLine) routeLines.add(i);
                 });
             };
-            collect(ctx.route.fixes, strong, true);
-            collect(ctx.route.airways, strong, true);
-            collect(ctx.route.points, strong, true);
-            collect(ctx.route.navaids, weak, false);
+            collect(ctx.route.fixes, strong, hitFixes, true);
+            collect(ctx.route.airways, strong, hitAirways, true);
+            collect(ctx.route.points, strong, hitPoints, true);
+            collect(ctx.route.navaids, weak, null, false);
 
             // --- LIMIT ------------------------------------------------------
             const limits = [];
@@ -1207,11 +1212,21 @@
             // swamped the list, and the station tabs already cover them.
             const needsReview = routeRelated && limits.length > 0;
 
+            // The NOTAM names routes or fixes and not one of them is ours.
+            // Usually that means another corridor - but a named fix can also be
+            // a boundary you are told to stay clear of, so this ranks only.
+            const namedAny = airways.mine.length + airways.theirs.length +
+                fixes.mine.length + fixes.theirs.length;
+            const scopedElsewhere = namedAny > 0 && strong.length === 0;
+
             return {
                 timeState,
                 stationMatch,
                 firMatch,
                 routeHits: strong,
+                hitFixes,
+                hitAirways,
+                hitPoints,
                 navaidHits: weak,
                 limits,
                 limitWords,
@@ -1225,6 +1240,7 @@
                 routeQuotes,
                 limitQuotes,
                 separated,
+                scopedElsewhere,
                 routeRelated,
                 airportRelated,
                 relevant: routeRelated || airportRelated,
@@ -1246,17 +1262,23 @@
             };
 
             const rows = [];
-            let outside = 0, airportCount = 0, routeCount = 0, review = 0;
+            let outside = 0, airportCount = 0, routeCount = 0, review = 0, scoped = 0;
             for (const n of notams) {
                 const r = crossCheckNotam(n, ctx);
                 if (r.timeState === "OUTSIDE") outside++;
                 if (r.airportRelated) airportCount++;
                 if (r.routeRelated) routeCount++;
-                if (r.needsReview) { review++; rows.push({ item: n, result: r }); }
+                if (r.needsReview) {
+                    review++;
+                    if (r.scopedElsewhere) scoped++;
+                    rows.push({ item: n, result: r });
+                }
             }
 
             // Most evidence first, then by station.
+            // Items scoped to somebody else's routes sink to the bottom.
             rows.sort((a, b) =>
+                (a.result.scopedElsewhere ? 1 : 0) - (b.result.scopedElsewhere ? 1 : 0) ||
                 (b.result.routeHits.length - a.result.routeHits.length) ||
                 (b.result.limits.length - a.result.limits.length) ||
                 a.item.station.localeCompare(b.item.station));
@@ -1275,6 +1297,7 @@
                 airportCount,
                 routeCount,
                 review,
+                scoped,
                 rows: rows.slice(0, 40)
             };
         }
@@ -1887,6 +1910,7 @@ E) NAV ILS RWY 26R CAT II/III NA`
                             비행 시간대에 유효하면서 <strong class="text-slate-300">통과 FIR에서 발행되었거나 15항 항로의 지점·항로를 언급</strong>하고
                             제한 표현을 포함한 NOTAM이라는 뜻입니다. 충족 여부는 기계가 판단하지 않으므로 반드시 직접 읽으십시오.
                             <br class="hidden sm:block">
+                            ${xc.scoped ? `이 중 <strong class="text-slate-300">${xc.scoped}건</strong>은 NOTAM이 지정한 항공로·지점이 내 항로와 하나도 걹치지 않아 목록 맨 아래로 내렸습니다. 다만 지정 지점이 <em>경계</em>로 쓰인 경우(“… 북쪽으로 비행하라”)도 있으므로 숨기지는 않습니다.<br class="hidden sm:block">` : ''}
                             공항 NOTAM(출발·도착·교체·회항지)은 이 목록에 들어오지 않지만 <strong class="text-slate-300">사라지지 않습니다</strong> —
                             위 “공항 NOTAM” 집계와 아래 공항별 탭에서 별도로 확인하십시오.
                         </p>
@@ -1938,7 +1962,19 @@ E) NAV ILS RWY 26R CAT II/III NA`
                                         + `<div class="mt-1 text-[11px] text-slate-500">\uc9c0\uc810\uc774 \uc804\ubd80 \ub0b4 \ud56d\ub85c \ubc16\uc774\ub77c\uba74 \ub2e4\ub978 \ud68c\ub791\uc744 \ub300\uc0c1\uc73c\ub85c \ud55c \uc870\ud56d\uc77c \uc218 \uc788\uc2b5\ub2c8\ub2e4 (\ucd94\uc815 \u00b7 \ud310\uc815 \uadfc\uac70 \uc544\ub2d8)</div>`);
                                 }
                                 if (r.result.routeHits.length) {
-                                    why.push(`15\ud56d \ud56d\ub85c\uc758 <span class="text-amber-300">${r.result.routeHits.join(', ')}</span> \uc5b8\uae09`
+                                    // Which kind matched matters: an airway of ours named
+                                    // by a NOTAM is a stronger signal than a single fix.
+                                    const parts = [];
+                                    if (r.result.hitAirways.length) {
+                                        parts.push(`\ud56d\uacf5\ub85c <span class="text-amber-300">${r.result.hitAirways.join(', ')}</span>`);
+                                    }
+                                    if (r.result.hitFixes.length) {
+                                        parts.push(`\uc9c0\uc810 <span class="text-amber-300">${r.result.hitFixes.join(', ')}</span>`);
+                                    }
+                                    if (r.result.hitPoints.length) {
+                                        parts.push(`\uc704\uacbd\ub3c4\uc810 <span class="text-amber-300">${r.result.hitPoints.join(', ')}</span>`);
+                                    }
+                                    why.push(`15\ud56d \ud56d\ub85c \uc77c\uce58 \u2014 ${parts.join(' \u00b7 ')}`
                                         + q(r.result.routeQuotes));
                                 }
                                 if (r.result.navaidHits.length) {
@@ -1990,6 +2026,7 @@ E) NAV ILS RWY 26R CAT II/III NA`
                                     <div class="flex flex-wrap items-center gap-2">
                                         <span class="font-mono text-sm font-bold text-amber-300">${r.item.id}</span>
                                         <span class="text-[10px] font-mono px-1.5 py-0.5 rounded border ${r.result.firMatch ? 'bg-amber-500/10 border-amber-500/40 text-amber-300' : 'bg-slate-800 border-slate-700 text-slate-300'}">${r.result.firMatch ? '통과 FIR 공역' : '항로 지점 일치'}</span>
+                                        ${r.result.scopedElsewhere ? `<span class="text-[10px] font-mono px-1.5 py-0.5 rounded border bg-slate-800 border-slate-700 text-slate-400">지정 항로가 내 항로와 무관</span>` : ''}
                                         <span class="text-[11px] font-mono text-slate-500 ml-auto">${r.item.station}</span>
                                     </div>
 
