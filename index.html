@@ -552,6 +552,24 @@
                     rawBlock = rawBlock.slice(0, sectionIdx).trim();
                 }
 
+                // The block runs to the next NOTAM header, so whatever the PDF
+                // text layer left in between comes with it. Page furniture is
+                // never part of a NOTAM - drop it outright.
+                rawBlock = rawBlock
+                    .replace(/^[ \t]*---[ \t]*\[PAGE \d+\/\d+\][ \t]*---[ \t]*$/gm, "")
+                    .replace(/^[ \t]*Page \d+[ \t]*$/gm, "");
+
+                // The last NOTAM before the flight plan section swallowed the
+                // whole OFP: RKRR Z0390/26 was six lines carrying 24,973
+                // characters. Cut at the first line that opens one of those
+                // documents - none of them can begin a NOTAM.
+                const docIdx = rawBlock.search(/^[ \t]*(?:CFP PLAN|FLIGHT RELEASE |REFILE FLT PLAN)/m);
+                if (docIdx > 0) {
+                    rawBlock = rawBlock.slice(0, docIdx);
+                }
+
+                rawBlock = rawBlock.replace(/\n{3,}/g, "\n\n").trim();
+
                 const id = `${cur.station} ${cur.num}`;
                 if (seen.has(id)) continue;
                 seen.add(id);
