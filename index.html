@@ -221,7 +221,7 @@
                             <button onclick="filterByReason('MARKING')" class="pill-reason px-2.5 py-1 rounded text-xs font-mono bg-slate-900 border border-slate-800 text-slate-400 hover:text-slate-200" data-reason="MARKING">🎨 표지·도색 (Marking)</button>
                             <button onclick="filterByReason('NON_FLIGHT_TIME')" class="pill-reason px-2.5 py-1 rounded text-xs font-mono bg-slate-900 border border-slate-800 text-slate-400 hover:text-slate-200" data-reason="NON_FLIGHT_TIME">⏰ 비운항시간 외</button>
                             <button onclick="filterByReason('NON_FLIGHT_ROUTE')" class="pill-reason px-2.5 py-1 rounded text-xs font-mono bg-slate-900 border border-slate-800 text-slate-400 hover:text-slate-200" data-reason="NON_FLIGHT_ROUTE">🛣️ 비운항항로/VFR</button>
-                            <button onclick="filterByReason('OBSTACLE_LOW')" class="pill-reason px-2.5 py-1 rounded text-xs font-mono bg-slate-900 border border-slate-800 text-slate-400 hover:text-slate-200" data-reason="OBSTACLE_LOW">🏗️ 저고도 크레인/장애물</button>
+                            <button onclick="filterByReason('O\TACLE_LOW')" class="pill-reason px-2.5 py-1 rounded text-xs font-mono bg-slate-900 border border-slate-800 text-slate-400 hover:text-slate-200" data-reason="O\TACLE_LOW">🏗️ 저고도 크레인/장애물</button>
                         </div>
                     </div>
                 </div>
@@ -295,7 +295,7 @@
             }
 
             // 1. Lighting (ALS, PAPI, RCLL, TWY LGT, Stop Bar, etc.)
-            if (/\b(ALS|ALSF|MALSR|MALSF|SALS|SSALS|PAPI|VASI|RCLL|REDL|RTIL|TDZL|APPROACH LIGHT|TWY.*LGT|APRON.*LGT|OBST.*LGT|FLG LGT|STOP BAR.*TRIAL|ENTRY LGT.*U\/S|LGT U\/S|LIGHTING)\b/.test(upper)) {
+            if (/\b(ALS|ALSF|MALSR|MALSF|SALS|SSALS|PAPI|VASI|RCLL|REDL|RTIL|TDZL|APPROACH LIGHT|TWY.*LGT|APRON.*LGT|O\T.*LGT|FLG LGT|STOP BAR.*TRIAL|ENTRY LGT.*U\/S|LGT U\/S|LIGHTING)\b/.test(upper)) {
                 let detail = "등화(Lighting) 정비/결함/시범운영 고시. 주간 운항 또는 정밀 계기접근 최저치(Minima)에 지장을 주지 않는 일반 등화 항목으로 자동 음영 처리함.";
                 if (upper.includes("PAPI") || upper.includes("VASI")) {
                     detail = "시각 진입각 지시등(PAPI/VASI) 결함/점검 고시. 계기접근(ILS/RNAV) 및 CAT I/II/III 착륙 최저치 산정에 영향이 없어 음영 처리함.";
@@ -349,10 +349,10 @@
             }
 
             // 5. Low Altitude Obstacle / Crane / Birds
-            if (/\b(CRANE|OBST|TOWER|BIRD|FLOCK|GRASS CUTTING|MOWING)\b/.test(upper) && !upper.includes("RWY 31R, TEMPORARY CRANE 4276FT")) {
+            if (/\b(CRANE|O\T|TOWER|BIRD|FLOCK|GRASS CUTTING|MOWING)\b/.test(upper) && !upper.includes("RWY 31R, TEMPORARY CRANE 4276FT")) {
                 return {
                     isShaded: true,
-                    reasonCategory: "OBSTACLE_LOW",
+                    reasonCategory: "O\TACLE_LOW",
                     reasonBadge: "🏗️ 저고도 크레인/장애물",
                     reasonDetail: "공항 인근 저고도 임시 기중기/장애물(100~250FT MSL) 또는 통상적 조류 주의보. 표준 SID/STAR 최저 안전고도(MEA/MOCA)에 영향을 주지 않아 음영 처리함."
                 };
@@ -732,7 +732,11 @@
             [/\bPROHIBITED\b|\bFORBIDDEN\b/, "금지", ["PROHIBITED", "FORBIDDEN"]],
             [/\bSHALL\b|\bMUST\b|\bMANDATORY\b|\bREQ\b/, "의무사항", ["MANDATORY", "SHALL", "MUST", "REQ"]],
             [/\bRESTRICTED\b|\bRESTRICTION\b|\bLIMITED TO\b/, "제한", ["RESTRICTION", "RESTRICTED", "LIMITED TO"]],
-            [/\bWIP\b|\bWORK IN PROGRESS\b|\bCONSTRUCTION\b/, "공사", ["WORK IN PROGRESS", "CONSTRUCTION", "WIP"]]
+            [/\bWIP\b|\bWORK IN PROGRESS\b|\bCONSTRUCTION\b/, "공사", ["WORK IN PROGRESS", "CONSTRUCTION", "WIP"]],
+            // A conditional route is only plannable inside its window, which
+            // is as hard a constraint as a closure. None of the words above
+            // appear in a CDR table.
+            [/\bCDR\b|\bCONDITIONAL ROUTE\b/, "조건부 항공로", ["CONDITIONAL ROUTE", "CDR"]]
         ];
 
         /* ====================================================================
@@ -1070,6 +1074,138 @@
             return { minNm, radius, lateralClear, vertClear, approx: true };
         }
 
+        /* --------------------------------------------------------------
+         * The OFP waypoint table
+         *
+         * Field 15 says where we go and says nothing about when. The OFP prints
+         * a three-line block per fix that carries both, plus the fix at which
+         * each FIR boundary is crossed:
+         *
+         *   0043  N36 22.4  131 330 ---/015 2906 33 28034P030 01 495   005  025
+         *   LANAT E131 25.7 133        /                      43 525 00.36 0312/
+         *   / RJJJ FIR      122   FUKUOKA                     LANAT
+         *
+         * line 1: distance, latitude.  line 2: name, longitude, cumulative time.
+         * line 3: a FIR boundary, when there is one.
+         * -------------------------------------------------------------- */
+
+        function dmToDeg(txt) {
+            const m = String(txt).match(/^([NSEW])(\d{2,3}) (\d{2}\.\d)$/);
+            if (!m) return null;
+            const v = parseInt(m[2], 10) + parseFloat(m[3]) / 60;
+            return (m[1] === "S" || m[1] === "W") ? -v : v;
+        }
+
+        function parseOfpWaypoints(fullText) {
+            const lines = String(fullText || "").split("\n");
+            const out = [];
+            for (let i = 0; i < lines.length - 1; i += 1) {
+                const a = lines[i].match(/^\d{4}\s+([NS]\d{2} \d{2}\.\d)\s/);
+                if (!a) continue;
+                const b = lines[i + 1].match(/^(\S+)\s+([EW]\d{3} \d{2}\.\d)/);
+                if (!b) continue;
+                const t = lines[i + 1].match(/\s(\d{2})\.(\d{2})\s+\d{4}\//);
+                const f = (lines[i + 2] || "").match(/\/\s*([A-Z]{4})\s+FIR/);
+                out.push({
+                    name: b[1],
+                    lat: dmToDeg(a[1]),
+                    lon: dmToDeg(b[2]),
+                    min: t ? parseInt(t[1], 10) * 60 + parseInt(t[2], 10) : null,
+                    fir: f ? f[1] : null
+                });
+            }
+            return out;
+        }
+
+        /** Off-blocks, as minutes past midnight UTC. */
+        function parseEtdMin(fullText) {
+            const m = String(fullText || "").toUpperCase()
+                .match(/\bETD\s+[A-Z]{4}\s+(\d{2})(\d{2})Z/);
+            return m ? parseInt(m[1], 10) * 60 + parseInt(m[2], 10) : null;
+        }
+
+        /** Date of flight as a UTC midnight, from field 18. */
+        function parseDofMs(fullText) {
+            const m = String(fullText || "").toUpperCase().match(/\bDOF\/(\d{6})\b/);
+            if (!m) return null;
+            return Date.UTC(2000 + +m[1].slice(0, 2), +m[1].slice(2, 4) - 1, +m[1].slice(4, 6));
+        }
+
+        /** A NOTAM's YYMMDDHHmm stamp. */
+        function stampMs(s10) {
+            return Date.UTC(2000 + +s10.slice(0, 2), +s10.slice(2, 4) - 1, +s10.slice(4, 6),
+                +s10.slice(6, 8), +s10.slice(8, 10));
+        }
+
+        /**
+         * Field 15 as legs: "GTC L512 TENAS" means the L512 leg runs GTC to
+         * TENAS. A CDR names the airway; the fixes at either end are what the
+         * OFP can put a time against.
+         */
+        function routeLegs(routeText) {
+            const toks = String(routeText || "").toUpperCase()
+                .replace(/\/[NMK]\d{3,4}[FSAM]\d{3,4}/g, " ")
+                .split(/[^A-Z0-9]+/).filter(Boolean);
+            const isAwy = (t) => /^[A-Z]{1,2}\d{1,3}$/.test(t);
+            const legs = [];
+            for (let i = 1; i < toks.length - 1; i += 1) {
+                if (isAwy(toks[i]) && !isAwy(toks[i - 1]) && !isAwy(toks[i + 1])) {
+                    legs.push({ awy: toks[i], from: toks[i - 1], to: toks[i + 1] });
+                }
+            }
+            return legs;
+        }
+
+        /**
+         * "CDR ARE ESTABLISHED AS FLW" followed by a table:
+         *   1)  L512        2608291200/2608292200  MEA
+         */
+        function parseCdrTable(raw) {
+            const up = String(raw || "").toUpperCase();
+            if (!/\bCDR\b/.test(up)) return [];
+            const re = /^\s*\d+\)\s+([A-Z]{1,2}\d{1,3})\s+(\d{10})\/(\d{10})\s*(.*)$/gm;
+            const out = [];
+            let m;
+            while ((m = re.exec(up)) !== null) {
+                out.push({ awy: m[1], from: m[2], to: m[3], alt: (m[4] || "").trim() });
+            }
+            return out;
+        }
+
+        /**
+         * Each conditional route we actually fly, with the time we are on it set
+         * against the window it is open. One of the few NOTAM restrictions that
+         * resolves to a yes or a no.
+         */
+        function cdrCheck(raw, ctx) {
+            const rows = parseCdrTable(raw);
+            if (!rows.length || !ctx.legs.length) return null;
+            const out = [];
+            rows.forEach((r) => {
+                const mine = ctx.legs.filter((l) => l.awy === r.awy);
+                if (!mine.length) return;
+                let lo = null, hi = null;
+                mine.forEach((l) => {
+                    [ctx.wpMin[l.from], ctx.wpMin[l.to]].forEach((v) => {
+                        if (v === undefined || v === null) return;
+                        if (lo === null || v < lo) lo = v;
+                        if (hi === null || v > hi) hi = v;
+                    });
+                });
+                const open = { from: stampMs(r.from), to: stampMs(r.to) };
+                let enter = null, exit = null, verdict = null, marginMin = null;
+                if (lo !== null && ctx.baseMs !== null) {
+                    enter = ctx.baseMs + lo * 60000;
+                    exit = ctx.baseMs + hi * 60000;
+                    verdict = (enter >= open.from && exit <= open.to) ? "INSIDE"
+                        : (exit < open.from || enter > open.to) ? "OUTSIDE" : "PARTIAL";
+                    marginMin = Math.round((open.to - exit) / 60000);
+                }
+                out.push({ awy: r.awy, alt: r.alt, open, legs: mine, enter, exit, verdict, marginMin });
+            });
+            return out.length ? out : null;
+        }
+
         /**
          * The crossed FIRs in the order they are entered, so a card can show
          * "came from X, leaving to Y" - which is exactly what a clause phrased
@@ -1374,6 +1510,7 @@
             if (area) area.vert = parseVerticalBand(raw);
             let geo = geoCheck(area, ctx.route.pointList, ctx.levels);
             const zones = zoneCheck(raw, ctx.route.pointList);
+            const cdr = cdrCheck(raw, ctx);
             // A prohibition states its own box. Showing the generic distance
             // block for the identical shape says the same thing twice.
             const samePts = (a, b) => a.length === b.length &&
@@ -1422,6 +1559,7 @@
                 limitWords,
                 area: dupZone ? null : area,
                 zones,
+                cdr,
                 geo,
                 firContext,
                 namedOurs: fixes.mine,
@@ -1450,8 +1588,15 @@
                 fullText,
                 fpl,
                 levels: extractLevelBand(fpl && fpl.route ? fpl.route : routeText),
-                route: extractRouteTokens(fpl && fpl.route ? fpl.route : routeText)
+                route: extractRouteTokens(fpl && fpl.route ? fpl.route : routeText),
+                legs: routeLegs(fpl && fpl.route ? fpl.route : routeText),
+                wp: parseOfpWaypoints(fullText)
             };
+            // Cumulative minutes per fix, and the clock those minutes count from.
+            ctx.wpMin = {};
+            ctx.wp.forEach((w) => { if (w.min !== null) ctx.wpMin[w.name] = w.min; });
+            const dof = parseDofMs(fullText), etd = parseEtdMin(fullText);
+            ctx.baseMs = (dof !== null && etd !== null) ? dof + etd * 60000 : null;
 
             const rows = [];
             let outside = 0, airportCount = 0, routeCount = 0, review = 0, scoped = 0, navNoise = 0;
@@ -1641,7 +1786,7 @@ TAKEOFF RUNWAYS 31L/R: BREEZY POINT CLIMB AND CANARSIE CLIMB NA EXCEPT FOR ACFT 
                     content: "RWY 31L/31R 이륙 경로 4,000~5,000FT 지점에 최고 302FT MSL의 임시 기중기(Crane) 다수 설치.",
                     action: "이륙 성능 계산(TODC/EFB) 시 장애물 데이터 반영 여부 및 엔진 고장 복행 시 상승 구배를 확인하십시오.",
                     raw: `27JUL26 21:10 - 08MAR27 21:10 KJFK A6516/26
-E) ODP JOHN F KENNEDY INTL, NEW YORK, NY. TAKEOFF MINIMUMS AND (OBSTACLE) DEPARTURE PROCEDURES AMDT 9A... ADD TAKEOFF OBSTACLE NOTE:
+E) ODP JOHN F KENNEDY INTL, NEW YORK, NY. TAKEOFF MINIMUMS AND (O\TACLE) DEPARTURE PROCEDURES AMDT 9A... ADD TAKEOFF O\TACLE NOTE:
 RWY 31R, TEMPORARY CRANE 4276FT FROM DER, 1540FT LEFT OF CENTERLINE, 125FT AGL/138FT MSL (2024-AEA-5111-NRA).`
                 });
                 criticalNotams.push({
@@ -2207,6 +2352,35 @@ E) NAV ILS RWY 26R CAT II/III NA`
                                         + `<div class="mt-1 text-[11px] text-slate-500">\ud56d\ub85c\ub294 15\ud56d \uc704\uacbd\ub3c4 \uc9c0\uc810 ${xc.routePointCount}\uac1c\ub97c \uc774\uc740 \uadfc\uc0ac\uc120\uc785\ub2c8\ub2e4. \uba85\uba85 \uc9c0\uc810\uc740 \ubb38\uc11c\uc5d0 \uc88c\ud45c\uac00 \uc5c6\uc2b5\ub2c8\ub2e4.</div>`);
                                 }
 
+                                // A conditional route is decidable end to end: the
+                                // airway is named, the window is timestamped, and the
+                                // OFP says when we are on it. Say so plainly, and say
+                                // how much delay it survives.
+                                const cd = r.result.cdr;
+                                if (cd) {
+                                    const zt = (ms) => {
+                                        const d = new Date(ms);
+                                        return `${String(d.getUTCDate()).padStart(2, '0')}일 `
+                                            + `${String(d.getUTCHours()).padStart(2, '0')}${String(d.getUTCMinutes()).padStart(2, '0')}Z`;
+                                    };
+                                    const hm = (m) => m >= 60 ? `${Math.floor(m / 60)}시간 ${m % 60}분` : `${m}분`;
+                                    cd.forEach((c) => {
+                                        const verdict = c.verdict === 'INSIDE'
+                                            ? '<span class="text-emerald-300">개방 시간 내</span>'
+                                            : c.verdict === 'OUTSIDE'
+                                                ? '<span class="text-rose-300">개방 시간 밖 — 이 항공로를 계획대로 쓸 수 없습니다</span>'
+                                                : '<span class="text-rose-300">일부 구간만 개방 시간 내</span>';
+                                        const slack = c.verdict === 'INSIDE' && c.marginMin > 0;
+                                        why.push(`<span class="text-slate-300">조건부 항공로 ${c.awy}</span> — 개방 ${zt(c.open.from)} ~ ${zt(c.open.to)}${c.alt ? ' · ' + c.alt : ''}`
+                                            + (c.enter
+                                                ? `<div class="mt-1">통과 예정 ${zt(c.enter)} ~ ${zt(c.exit)} — ${verdict}`
+                                                    + (slack ? ` · 종료까지 ${hm(c.marginMin)} 여유` : '') + '</div>'
+                                                    + (slack ? `<div class="mt-1 text-[11px] text-amber-300/80">출발이 ${hm(c.marginMin)} 이상 지연되면 개방 시간 밖이 됩니다.</div>` : '')
+                                                : '<div class="mt-1 text-amber-300">통과 시각 계산 불가 — OFP 누적시간을 읽지 못했습니다</div>')
+                                            + `<div class="mt-1 text-[11px] text-slate-500">해당 구간 ${c.legs.map((l) => l.from + '→' + l.to).join(', ')} · 시각은 OFP 누적시간 기준</div>`);
+                                    });
+                                }
+
                                 // A prohibition and a gate line have no grey band -
                                 // the route is inside or it is not, it crosses or it
                                 // does not - so these are stated flatly.
@@ -2587,7 +2761,7 @@ E) NAV ILS RWY 26R CAT II/III NA`
                 if (currentReasonFilter === 'MARKING' && item.reasonCategory !== 'MARKING') return false;
                 if (currentReasonFilter === 'NON_FLIGHT_TIME' && item.reasonCategory !== 'NON_FLIGHT_TIME') return false;
                 if (currentReasonFilter === 'NON_FLIGHT_ROUTE' && item.reasonCategory !== 'NON_FLIGHT_ROUTE') return false;
-                if (currentReasonFilter === 'OBSTACLE_LOW' && item.reasonCategory !== 'OBSTACLE_LOW') return false;
+                if (currentReasonFilter === 'O\TACLE_LOW' && item.reasonCategory !== 'O\TACLE_LOW') return false;
 
                 // Keyword search
                 if (searchKeyword) {
