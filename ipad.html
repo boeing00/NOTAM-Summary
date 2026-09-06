@@ -1,0 +1,585 @@
+<!doctype html>
+<html lang="ko">
+<head>
+<meta charset="utf-8">
+<meta name="viewport" content="width=device-width, initial-scale=1, viewport-fit=cover">
+<meta name="apple-mobile-web-app-capable" content="yes">
+<meta name="apple-mobile-web-app-status-bar-style" content="black-translucent">
+<meta name="apple-mobile-web-app-title" content="NOTAM">
+<link rel="manifest" href="./manifest.json">
+<title>NOTAM · 조종석 뷰</title>
+
+<script src="https://cdnjs.cloudflare.com/ajax/libs/pdf.js/3.11.174/pdf.min.js"></script>
+<script src="./aar223_text.js?v=2.6"></script>
+<script src="./aar202_text.js?v=2.6"></script>
+<script src="./notam_engine.js?v=3.0"></script>
+
+<style>
+  :root{
+    --bg:#0a0f1a; --panel:#101827; --panel2:#151f31; --line:#22304a;
+    --ink:#e6edf7; --ink2:#9fb0c9; --ink3:#6c7f9b;
+    --crit:#ff5a5a; --crit-bg:#3a1114;
+    --calc:#3fd68a; --calc-bg:#0d2b1e;
+    --rev:#ffb340;  --rev-bg:#33240a;
+    --appl:#5aa9ff; --appl-bg:#0e2138;
+    --mute:#4a5a72; --mute-bg:#0e1522;
+    --tap:44px;
+  }
+  *{box-sizing:border-box;-webkit-tap-highlight-color:transparent}
+  html,body{margin:0;padding:0}
+  body{
+    background:var(--bg);color:var(--ink);
+    font:16px/1.55 -apple-system,BlinkMacSystemFont,"SF Pro Text","Apple SD Gothic Neo","Noto Sans KR",sans-serif;
+    padding:env(safe-area-inset-top) env(safe-area-inset-right) env(safe-area-inset-bottom) env(safe-area-inset-left);
+    -webkit-text-size-adjust:100%;
+  }
+  .wrap{max-width:1100px;margin:0 auto;padding:0 16px 96px}
+
+  .bar{position:sticky;top:0;z-index:20;background:rgba(10,15,26,.94);
+       backdrop-filter:saturate(1.4) blur(12px);border-bottom:1px solid var(--line);
+       margin:0 -16px;padding:10px 16px 0}
+  .flt{display:flex;align-items:baseline;gap:10px;flex-wrap:wrap;min-height:26px}
+  .flt b{font-size:19px;letter-spacing:.3px}
+  .flt span{color:var(--ink2);font-size:13px;font-variant-numeric:tabular-nums}
+  .segs{display:flex;gap:6px;overflow-x:auto;padding:10px 0;scrollbar-width:none}
+  .segs::-webkit-scrollbar{display:none}
+  .seg{flex:0 0 auto;min-height:var(--tap);display:flex;align-items:center;gap:7px;
+       padding:0 15px;border-radius:11px;border:1px solid var(--line);
+       background:var(--panel);color:var(--ink2);font-size:14px;font-weight:600;cursor:pointer}
+  .seg[aria-pressed="true"]{background:var(--appl-bg);border-color:#2d5c8f;color:#cfe4ff}
+  .seg .n{font-variant-numeric:tabular-nums;opacity:.75;font-weight:500}
+
+  .intake{margin-top:18px;border:1px dashed #2c3f5e;border-radius:16px;background:var(--panel);
+          padding:26px 18px;text-align:center}
+  .intake h1{margin:0 0 6px;font-size:18px;font-weight:700}
+  .intake p{margin:0 0 16px;color:var(--ink3);font-size:13.5px}
+  .btns{display:flex;gap:8px;justify-content:center;flex-wrap:wrap}
+  .btn{min-height:var(--tap);display:inline-flex;align-items:center;padding:0 18px;border-radius:11px;
+       border:1px solid #2d5c8f;background:var(--appl-bg);color:#cfe4ff;font-size:14.5px;font-weight:600;cursor:pointer}
+  .btn.ghost{background:var(--panel2);border-color:var(--line);color:var(--ink2)}
+  .intake.drag{border-color:#5aa9ff;background:#0e2138}
+
+  .pkg{margin-top:20px;border:1px solid var(--line);border-radius:16px;overflow:hidden;background:var(--panel)}
+  .pkg>summary{list-style:none;min-height:56px;display:flex;align-items:center;gap:12px;padding:12px 16px;cursor:pointer;background:var(--panel2)}
+  .pkg>summary::-webkit-details-marker{display:none}
+  .chev{color:var(--ink3);font-size:13px;transition:transform .15s}
+  details[open]>summary .chev{transform:rotate(90deg)}
+  .pkg h2{margin:0;font-size:16px;font-weight:700}
+  .sub{color:var(--ink3);font-size:12.5px;margin-top:2px}
+  .cnt{margin-left:auto;color:var(--ink2);font-size:13px;font-variant-numeric:tabular-nums}
+  .excl h2{color:var(--ink2);font-weight:600}
+  .excl{background:var(--mute-bg)}
+
+  .cat{border-top:1px solid var(--line)}
+  .cat>summary{list-style:none;min-height:46px;display:flex;align-items:center;gap:10px;padding:9px 16px;cursor:pointer}
+  .cat>summary::-webkit-details-marker{display:none}
+  .cat h3{margin:0;font-size:14px;font-weight:700;color:#cfe0f5;letter-spacing:.2px}
+  .cat .src{color:var(--ink3);font-size:11.5px;font-family:ui-monospace,Menlo,monospace}
+  .list{padding:4px 8px 10px}
+  .empty{padding:22px 16px;color:var(--ink3);font-size:13.5px;text-align:center}
+
+  .n{border:1px solid var(--line);border-radius:13px;margin:8px 0;overflow:hidden;background:#0d1523}
+  .n>summary{list-style:none;display:flex;gap:12px;padding:12px 14px;min-height:var(--tap);align-items:flex-start;cursor:pointer}
+  .n>summary::-webkit-details-marker{display:none}
+  .rail{flex:0 0 6px;align-self:stretch;border-radius:3px;background:var(--mute)}
+  .n[data-t="crit"] .rail{background:var(--crit)}
+  .n[data-t="calc"] .rail{background:var(--calc)}
+  .n[data-t="rev"] .rail{background:var(--rev)}
+  .n[data-t="appl"] .rail{background:var(--appl)}
+  .n[data-t="shade"]{opacity:.55}
+  .n[data-t="shade"] .hdr b{color:var(--ink2);font-weight:600}
+  .hdr{flex:1;min-width:0}
+  .l1{display:flex;align-items:center;gap:8px;flex-wrap:wrap}
+  .hdr b{font:600 15.5px/1.3 ui-monospace,SFMono-Regular,Menlo,monospace;letter-spacing:.4px}
+  .l2{color:var(--ink3);font-size:12.5px;margin-top:3px;font-variant-numeric:tabular-nums}
+  .l3{color:var(--ink2);font-size:13.5px;margin-top:6px;display:-webkit-box;-webkit-line-clamp:2;-webkit-box-orient:vertical;overflow:hidden}
+  .tag{flex:0 0 auto;font-size:11.5px;font-weight:700;padding:3px 8px;border-radius:7px;border:1px solid transparent;white-space:nowrap}
+  .t-crit{background:var(--crit-bg);color:#ffb0b0;border-color:#6d2226}
+  .t-calc{background:var(--calc-bg);color:#8ef0bd;border-color:#1d5c40}
+  .t-rev{background:var(--rev-bg);color:#ffd490;border-color:#6b4a12}
+  .t-appl{background:var(--appl-bg);color:#bcd9ff;border-color:#25507e}
+  .t-shade{background:var(--mute-bg);color:var(--ink3);border-color:#2a3a52}
+  .chips{display:flex;gap:5px;flex-wrap:wrap;margin-top:7px}
+  .chip{font:600 11.5px/1 ui-monospace,Menlo,monospace;padding:4px 7px;border-radius:6px;background:#132133;color:#9ec7ff;border:1px solid #24405f}
+  .chip.calc{background:var(--calc-bg);color:#8ef0bd;border-color:#1d5c40}
+  .chip.warn{background:var(--rev-bg);color:#ffd490;border-color:#6b4a12}
+  .body{padding:0 14px 14px 32px;border-top:1px solid var(--line);margin-top:2px}
+  .why{margin:12px 0 0;padding:11px 12px;border-radius:10px;background:#0f1b2b;border:1px solid #1d2d45;color:var(--ink2);font-size:13.5px}
+  .why h4{margin:0 0 5px;font-size:12px;color:var(--ink3);font-weight:700;letter-spacing:.6px}
+  pre.raw{margin:12px 0 0;padding:12px;border-radius:10px;background:#080d16;border:1px solid #1a2739;color:#bcd0e8;
+          font:12.5px/1.6 ui-monospace,SFMono-Regular,Menlo,monospace;white-space:pre-wrap;word-break:break-word;overflow-x:auto}
+  .legend{margin-top:18px;display:flex;gap:14px;flex-wrap:wrap;color:var(--ink3);font-size:12.5px}
+  .legend i{display:inline-block;width:10px;height:10px;border-radius:3px;margin-right:5px;vertical-align:-1px}
+  .note{margin-top:14px;padding:12px 14px;border-radius:12px;border:1px solid #2a3a52;background:#0d1522;color:var(--ink2);font-size:13px}
+  .busy{padding:50px 0;text-align:center;color:var(--ink3);font-size:14px}
+  .err{margin-top:16px;padding:14px;border-radius:12px;border:1px solid #6d2226;background:var(--crit-bg);color:#ffb0b0;font-size:13.5px}
+
+  /* ---- RAW: the real PDF, marked in place ---------------------------- */
+  .views{display:flex;gap:6px;margin-left:auto}
+  .view{min-height:36px;display:flex;align-items:center;padding:0 13px;border-radius:9px;
+        border:1px solid var(--line);background:var(--panel);color:var(--ink2);
+        font-size:13.5px;font-weight:600;cursor:pointer}
+  .view[aria-pressed="true"]{background:var(--appl-bg);border-color:#2d5c8f;color:#cfe4ff}
+  #raw{margin-top:16px}
+  .pg{position:relative;margin:0 auto 14px;background:#fff;border-radius:6px;overflow:hidden;
+      box-shadow:0 2px 14px rgba(0,0,0,.5)}
+  .pg canvas{display:block;width:100%;height:auto}
+  .pg .ph{position:absolute;inset:0;display:flex;align-items:center;justify-content:center;
+          color:#8a97a8;font-size:13px;background:#f4f6f9}
+  .pgno{position:absolute;right:8px;top:6px;z-index:3;font:600 11px/1 ui-monospace,Menlo,monospace;
+        color:#5b6b80;background:rgba(255,255,255,.82);padding:3px 6px;border-radius:5px}
+  .mk{position:absolute;pointer-events:none;border-radius:2px}
+  /* The mark must not compete with the words it is marking. A 2px hard border
+     on every line boxed the text in and made the one NOTAM that matters most
+     the hardest to read. Thin, low-contrast outline; the badge carries the
+     weight instead. */
+  .mk.crit {background:rgba(255,80,80,.09);  box-shadow:inset 0 0 0 1px rgba(210,60,60,.34)}
+  .mk.calc {background:rgba(30,200,120,.16); box-shadow:inset 0 0 0 2px rgba(15,150,90,.8)}
+  .mk.rev  {background:rgba(255,175,50,.18); box-shadow:inset 0 -2px 0 0 rgba(200,120,0,.9)}
+  .mk.appl {background:rgba(60,140,255,.13); box-shadow:inset 0 0 0 1px rgba(40,110,220,.55)}
+  .mk.shade{background:rgba(140,150,165,.42)}
+  .mk.pkg2 {background:rgba(160,170,185,.30)}
+  .badge{position:absolute;z-index:2;transform:translateY(-100%);
+         font:700 10.5px/1 ui-monospace,Menlo,monospace;padding:3px 5px;border-radius:4px;
+         color:#fff;white-space:nowrap;pointer-events:none}
+  .badge.crit{background:#d1454b}.badge.calc{background:#127a4d}
+  .badge.rev{background:#a06000}.badge.appl{background:#1f5fb8}
+  .rawbar{position:sticky;top:0;z-index:5;display:flex;gap:8px;align-items:center;flex-wrap:wrap;
+          padding:10px 0;color:var(--ink3);font-size:12.5px}
+  .rawbar .k{display:inline-flex;align-items:center;gap:5px}
+  .rawbar .sw{width:11px;height:11px;border-radius:3px;display:inline-block}
+</style>
+</head>
+<body>
+<div class="wrap">
+  <div class="bar">
+    <div class="flt" id="flt"></div>
+    <div class="segs" id="segs"></div>
+  </div>
+  <div id="raw" hidden></div>
+
+  <div class="intake" id="intake">
+    <h1>운항계획서(OFP) PDF를 여십시오</h1>
+    <p>기기 안에서만 처리됩니다. 파일은 어디로도 전송되지 않습니다.</p>
+    <div class="btns">
+      <button class="btn" id="pick">PDF 선택</button>
+      <button class="btn ghost" id="s223">샘플 AAR223 JFK→ICN</button>
+      <button class="btn ghost" id="s202">샘플 AAR202 ICN→LAX</button>
+    </div>
+    <input type="file" id="file" accept="application/pdf" hidden>
+  </div>
+
+  <div id="out"></div>
+
+  <div class="legend">
+    <span><i style="background:var(--crit)"></i>운항 직결 필수</span>
+    <span><i style="background:var(--calc)"></i>기계 계산 근거</span>
+    <span><i style="background:var(--rev)"></i>확인 필요</span>
+    <span><i style="background:var(--appl)"></i>내 공항·항로</span>
+    <span><i style="background:var(--mute)"></i>음영 (등화·표지)</span>
+  </div>
+  <div class="note">
+    거리·고도·포함 여부·시각처럼 <b>산술로 계산된 것만 단정</b>합니다. 그 밖은 원문을 띄우고
+    강조만 하며 판단은 조종사가 합니다. 음영 항목도 <b>목록에서 사라지지 않고 접힐 뿐</b>이며,
+    PACKAGE 2는 분석에서만 빠지고 원문은 그대로 남습니다.
+  </div>
+</div>
+
+<script>
+pdfjsLib.GlobalWorkerOptions.workerSrc =
+  'https://cdnjs.cloudflare.com/ajax/libs/pdf.js/3.11.174/pdf.worker.min.js';
+
+const esc = (s) => String(s == null ? "" : s)
+  .replace(/&/g, "&amp;").replace(/</g, "&lt;").replace(/>/g, "&gt;");
+
+let DATA = null;
+let filter = "all";
+
+/* Bucket order is deliberate. CRITICAL outranks shading, so an ILS outage is
+   never greyed. Shading outranks every "applies to me" signal, which is the
+   requested behaviour: a light or marking item is greyed even when it is on
+   our airport, in our window. */
+function bucket(it) {
+  if (it.reasonCategory === "CRITICAL") return "crit";
+  if (it.autoShaded) return "shade";
+  const x = it.xc;
+  if (x.geo || x.zones || (x.cdr && x.cdr.length) || x.dailyCheck) return "calc";
+  if (x.needsReview) return "rev";
+  return "appl";
+}
+const LABEL = {
+  crit: ["운항 직결 필수", "t-crit"], calc: ["계산 근거", "t-calc"],
+  rev: ["확인 필요", "t-rev"], appl: ["적용", "t-appl"], shade: ["음영", "t-shade"]
+};
+
+/* Every chip below is a number the engine computed. Nothing is asserted here. */
+function chips(it) {
+  const x = it.xc, out = [];
+  if (x.geo) out.push(['calc', (x.geo.lateralClear ? "이격 " : "저촉 ") + Math.round(x.geo.minNm) +
+    "NM" + (x.geo.radius ? " (반경 " + x.geo.radius + "NM)" : "")]);
+  ((x.zones && x.zones.banned) || []).forEach((z) => out.push([z.entered ? 'warn' : 'calc',
+    z.entered ? "금지공역 관통" : "금지공역 " + Math.round(z.nearestNm) + "NM"]));
+  ((x.zones && x.zones.gates) || []).forEach((g) => out.push([g.crosses ? 'warn' : 'calc',
+    g.crosses ? "구간선 교차" : "구간선 " + Math.round(g.nearestNm) + "NM"]));
+  (x.cdr || []).forEach((c) => {
+    const v = c.verdict === "INSIDE" ? "개방시간 내" : c.verdict === "OUTSIDE" ? "개방시간 밖"
+            : c.verdict === "PARTIAL" ? "일부만 개방" : "판정불가";
+    out.push([c.verdict === "INSIDE" ? 'calc' : 'warn', "CDR " + c.awy + " · " + v +
+      (c.marginMin != null ? " · 여유 " + c.marginMin + "분" : "")]);
+  });
+  if (x.dailyCheck) {
+    const d = x.dailyCheck;
+    const hh = (m) => String(Math.floor(m / 60)).padStart(2, "0") + String(m % 60).padStart(2, "0");
+    out.push([d.inWindow ? 'warn' : 'calc',
+      "일일창 " + d.spec + " · 진입 " + hh(d.entry) + "Z · " + (d.inWindow ? "창 안" : "창 밖")]);
+  }
+  (x.hitFixes || []).forEach((f) => out.push(['', "픽스 " + f]));
+  (x.hitAirways || []).forEach((a) => out.push(['', "항공로 " + a]));
+  (x.hitPoints || []).forEach((p) => out.push(['', p]));
+  if (x.limits && x.limits.length) out.push(['', x.limits.slice(0, 3).join(" · ")]);
+  return out;
+}
+
+function firstLine(it) {
+  const m = it.raw.match(/E\)\s*([\s\S]{0,220})/);
+  return (m ? m[1] : it.raw).replace(/\s+/g, " ").trim();
+}
+
+function card(it) {
+  const b = bucket(it), [lab, cls] = LABEL[b], cs = chips(it);
+  return '<details class="n" data-t="' + b + '"><summary><span class="rail"></span><span class="hdr">' +
+    '<span class="l1"><b>' + esc(it.station) + ' ' + esc(it.id.slice(it.station.length + 1)) + '</b>' +
+    '<span class="tag ' + cls + '">' + lab + '</span>' +
+    (b === "shade" && it.reasonBadge ? '<span class="tag t-shade">' + esc(it.reasonBadge) + '</span>' : '') +
+    '</span><span class="l2">' + esc(it.valid) + '</span>' +
+    '<span class="l3">' + esc(firstLine(it)) + '</span>' +
+    (cs.length ? '<span class="chips">' + cs.map(([k, t]) =>
+      '<span class="chip ' + k + '">' + esc(t) + '</span>').join('') + '</span>' : '') +
+    '</span></summary><div class="body">' +
+    (it.reasonDetail ? '<div class="why"><h4>' + esc(it.reasonBadge || '') + '</h4>' + esc(it.reasonDetail) + '</div>' : '') +
+    '<pre class="raw">' + esc(it.raw) + '</pre></div></details>';
+}
+
+function keep(it) {
+  const b = bucket(it);
+  return filter === "all" ? true
+       : filter === "hot" ? (b === "crit" || b === "calc" || b === "rev")
+       : filter === "active" ? b !== "shade"
+       : b === "shade";
+}
+
+/* Runway first: it is what closes an airport. Then the rest of the ground,
+   then the air. Anything the document labelled with a heading we do not know
+   still appears - at the end, never dropped. */
+const CAT_ORDER = ["활주로", "유도로", "계류장", "출발·접근", "공항 일반",
+                   "항법시설", "위성항법", "통신", "항공로", "공역", "장애물",
+                   "회사 지시", "기타"];
+
+function byCategory(items) {
+  const map = new Map();
+  items.forEach((it) => {
+    const k = it.categoryKo || "분류 없음";
+    if (!map.has(k)) map.set(k, []);
+    map.get(k).push(it);
+  });
+  const known = CAT_ORDER.filter((k) => map.has(k));
+  const rest = [...map.keys()].filter((k) => CAT_ORDER.indexOf(k) < 0).sort();
+  return known.concat(rest).map((k) => [k, map.get(k)]);
+}
+
+function catBlock(name, items) {
+  const shown = items.filter(keep);
+  if (!shown.length) return '';
+  const srcs = [...new Set(items.map((i) => i.categoryLabel).filter(Boolean))];
+  return '<details class="cat" open><summary><span class="chev">&#9656;</span><span>' +
+    '<h3>' + esc(name) + '</h3>' +
+    (srcs.length ? '<div class="src">' + esc(srcs.join(" + ")) + '</div>' : '') +
+    '</span><span class="cnt">' + shown.length + ' / ' + items.length + '</span></summary>' +
+    '<div class="list">' + shown.map(card).join('') + '</div></details>';
+}
+
+function section(title, sub, items, opts) {
+  opts = opts || {};
+  const shown = items.filter(keep);
+  const counts = items.reduce((a, it) => { const b = bucket(it); a[b] = (a[b] || 0) + 1; return a; }, {});
+  const badge = ["crit", "calc", "rev", "appl", "shade"]
+    .filter((k) => counts[k]).map((k) => LABEL[k][0] + " " + counts[k]).join(" · ");
+  const inner = opts.flat
+    ? '<div class="list">' + (shown.length ? shown.map(card).join('') : '<div class="empty">해당 항목 없음</div>') + '</div>'
+    : (byCategory(items).map(([k, v]) => catBlock(k, v)).join('') ||
+       '<div class="empty">이 필터에 해당하는 항목이 없습니다</div>');
+  return '<details class="pkg' + (opts.excluded ? ' excl' : '') + '"' + (opts.open ? ' open' : '') + '>' +
+    '<summary><span class="chev">&#9656;</span><span><h2>' + esc(title) + '</h2>' +
+    '<div class="sub">' + esc(sub) + (badge ? ' · ' + badge : '') + '</div></span>' +
+    '<span class="cnt">' + shown.length + ' / ' + items.length + '</span></summary>' + inner + '</details>';
+}
+
+function render() {
+  const d = DATA;
+  const p = (n) => d.items.filter((i) => i.pkg === n);
+  document.getElementById('out').innerHTML =
+    section('PACKAGE 1 · 출발 · 목적지 · 교체공항',
+            [...new Set(p(1).map((i) => i.station))].join(' · ') || '—', p(1), { open: true }) +
+    section('PACKAGE 3 · 항로',
+            'FIR ' + d.firSeq.map((f) => f.fir).join(' → '), p(3), { open: true }) +
+    section('PACKAGE 2 · 재출항 · ETP · 항로상 회항공항',
+            '분석 제외 — 요청 시에만 대조합니다', p(2), { excluded: true, flat: true });
+}
+
+function segs() {
+  const inScope = DATA.items.filter((i) => i.pkg !== 2);
+  const n = (f) => inScope.filter((it) => {
+    const b = bucket(it);
+    return f === "all" ? true : f === "hot" ? (b === "crit" || b === "calc" || b === "rev")
+         : f === "active" ? b !== "shade" : b === "shade";
+  }).length;
+  document.getElementById('segs').innerHTML =
+    [["hot", "중요만"], ["active", "음영 제외"], ["all", "전체"], ["shade", "음영만"]]
+      .map(([k, t]) => '<button class="seg" data-f="' + k + '" aria-pressed="' + (k === filter) + '">' +
+        t + '<span class="n">' + n(k) + '</span></button>').join('') +
+    '<span class="views">' +
+      '<button class="view" data-v="list" aria-pressed="' + (view === 'list') + '">목록</button>' +
+      '<button class="view" data-v="raw" aria-pressed="' + (view === 'raw') + '"' +
+        (LAYOUT ? '' : ' disabled title="PDF를 열었을 때만 됩니다"') + '>원문 PDF</button>' +
+    '</span>';
+  document.querySelectorAll('.seg').forEach((b) => b.addEventListener('click', () => {
+    filter = b.dataset.f; segs();
+    if (view === 'list') { render(); window.scrollTo({ top: 0, behavior: 'smooth' }); }
+  }));
+  document.querySelectorAll('.view').forEach((b) => b.addEventListener('click', () => {
+    if (b.hasAttribute('disabled')) return;
+    setView(b.dataset.v);
+    window.scrollTo({ top: 0, behavior: 'smooth' });
+  }));
+}
+
+function header(name) {
+  const w = DATA.window;
+  const t = (ms) => { const x = new Date(ms);
+    return String(x.getUTCHours()).padStart(2, '0') + String(x.getUTCMinutes()).padStart(2, '0') + 'Z'; };
+  const f = DATA.fpl;
+  document.getElementById('flt').innerHTML =
+    '<b>' + esc(f ? (f.callsign || '') + ' ' + f.dep + '→' + f.dest : name) + '</b>' +
+    '<span>비행창 ' + (w ? t(w.start) + ' – ' + t(w.end) : '—') + '</span>' +
+    '<span>FL ' + (DATA.levels ? DATA.levels.min + '–' + DATA.levels.max : '—') + '</span>' +
+    '<span>웨이포인트 ' + DATA.wpCount + '</span>' +
+    '<span>NOTAM ' + DATA.items.length + '</span>';
+}
+
+/* ==================================================================
+ * RAW view - the actual PDF, marked where the engine found something.
+ *
+ * Pages are drawn only while they are near the viewport and released as
+ * they leave it. A 99-page OFP at retina scale is well over 400MB of
+ * canvas if it is all kept, and Safari kills the tab long before that.
+ * ================================================================== */
+let LAYOUT = null;          // { pages, doc } from extractPdfLayout
+let PAGE_MARKS = null;      // page number -> marks to draw
+let view = "list";
+
+/* Runs of text belonging to one NOTAM, merged into line rectangles. Items
+   arrive one text run at a time; a row is the run of them sharing a baseline. */
+function mergeRows(items) {
+    const sorted = items.slice().sort((a, b) => (a.y - b.y) || (a.x - b.x));
+    const rows = [];
+    for (const it of sorted) {
+        const last = rows[rows.length - 1];
+        if (last && Math.abs(it.y - last.y) <= 2.5) {
+            last.x = Math.min(last.x, it.x);
+            last.r = Math.max(last.r, it.x + it.w);
+            last.h = Math.max(last.h, it.h);
+        } else {
+            rows.push({ x: it.x, y: it.y, r: it.x + it.w, h: it.h || 8 });
+        }
+    }
+    return rows.filter((r) => r.r - r.x > 1).map((r) => ({ x: r.x, y: r.y, w: r.r - r.x, h: r.h }));
+}
+
+function buildMarks() {
+    const byPage = new Map();
+    LAYOUT.pages.forEach((p) => byPage.set(p.page, []));
+    DATA.items.forEach((it) => {
+        if (!(it.to > it.at)) return;
+        const b = it.pkg === 2 ? "pkg2" : bucket(it);
+        LAYOUT.pages.forEach((p) => {
+            if (p.to <= it.at || p.from >= it.to) return;
+            const on = p.items.filter((x) => x.end > it.at && x.start < it.to);
+            if (!on.length) return;
+            const rows = mergeRows(on);
+            byPage.get(p.page).push({
+                cls: b,
+                id: it.id,
+                label: it.pkg === 2 ? "PKG2" : LABEL[b][0],
+                rows
+            });
+        });
+    });
+    PAGE_MARKS = byPage;
+}
+
+function drawOverlay(host, page) {
+    const marks = PAGE_MARKS.get(page.page) || [];
+    const k = host.clientWidth / page.width;
+    const frag = document.createDocumentFragment();
+    marks.forEach((m) => {
+        m.rows.forEach((r, i) => {
+            const d = document.createElement('div');
+            d.className = 'mk ' + m.cls;
+            d.style.cssText = 'left:' + (r.x * k) + 'px;top:' + (r.y * k) + 'px;' +
+                'width:' + (r.w * k) + 'px;height:' + (r.h * k + 2) + 'px';
+            frag.appendChild(d);
+            // One label per NOTAM, on its first line, and only for the marks a
+            // pilot is meant to stop at. Labelling every greyed light NOTAM
+            // would bury the four that matter.
+            if (i === 0 && (m.cls === 'crit' || m.cls === 'calc' || m.cls === 'rev')) {
+                const b = document.createElement('div');
+                b.className = 'badge ' + m.cls;
+                b.textContent = m.label + ' · ' + m.id;
+                b.style.cssText = 'left:' + (r.x * k) + 'px;top:' + (r.y * k - 1) + 'px';
+                frag.appendChild(b);
+            }
+        });
+    });
+    host.appendChild(frag);
+}
+
+async function renderPage(host) {
+    if (host.dataset.state === 'done' || host.dataset.state === 'busy') return;
+    host.dataset.state = 'busy';
+    const page = LAYOUT.pages[+host.dataset.i];
+    try {
+        const pdfPage = await LAYOUT.doc.getPage(page.page);
+        const cssW = host.clientWidth;
+        const dpr = Math.min(2, window.devicePixelRatio || 1);
+        const vp = pdfPage.getViewport({ scale: (cssW / page.width) * dpr });
+        const canvas = document.createElement('canvas');
+        canvas.width = Math.round(vp.width);
+        canvas.height = Math.round(vp.height);
+        await pdfPage.render({ canvasContext: canvas.getContext('2d'), viewport: vp }).promise;
+        host.innerHTML = '';
+        host.appendChild(canvas);
+        const no = document.createElement('div');
+        no.className = 'pgno';
+        no.textContent = page.page + ' / ' + LAYOUT.pages.length;
+        host.appendChild(no);
+        drawOverlay(host, page);
+        host.dataset.state = 'done';
+    } catch (e) {
+        host.dataset.state = '';
+        host.innerHTML = '<div class="ph">이 페이지를 그리지 못했습니다</div>';
+    }
+}
+
+function releasePage(host) {
+    if (host.dataset.state !== 'done') return;
+    host.innerHTML = '<div class="ph">' + (+host.dataset.i + 1) + ' 쪽</div>';
+    host.dataset.state = '';
+}
+
+let pageObserver = null;
+
+function renderRaw() {
+    const host = document.getElementById('raw');
+    if (!LAYOUT) {
+        host.innerHTML = '<div class="err">원문 보기는 PDF를 열었을 때만 됩니다. ' +
+            '번들 샘플은 텍스트만 있고 원본 파일이 없습니다.</div>';
+        return;
+    }
+    if (!PAGE_MARKS) buildMarks();
+
+    const counts = {};
+    PAGE_MARKS.forEach((v) => v.forEach((m) => { counts[m.cls] = (counts[m.cls] || 0) + 1; }));
+    const key = [['crit', '운항 직결 필수'], ['calc', '계산 근거'], ['rev', '확인 필요'],
+                 ['appl', '내 공항·항로'], ['shade', '음영'], ['pkg2', 'PKG2 (분석 제외)']]
+        .filter(([k]) => counts[k])
+        .map(([k, t]) => '<span class="k"><i class="sw mk ' + k + '"></i>' + t + ' ' + counts[k] + '</span>')
+        .join('');
+
+    host.innerHTML = '<div class="rawbar">' + key + '</div>' +
+        LAYOUT.pages.map((p, i) =>
+            '<div class="pg" data-i="' + i + '" style="max-width:' + Math.round(p.width * 1.6) + 'px;' +
+            'aspect-ratio:' + p.width + '/' + p.height + '"><div class="ph">' + p.page + ' 쪽</div></div>'
+        ).join('');
+
+    if (pageObserver) pageObserver.disconnect();
+    // Draw a screen ahead and behind; release anything three screens away.
+    pageObserver = new IntersectionObserver((entries) => {
+        entries.forEach((e) => {
+            if (e.isIntersecting) renderPage(e.target);
+            else if (Math.abs(e.boundingClientRect.top) > window.innerHeight * 3) releasePage(e.target);
+        });
+    }, { rootMargin: '900px 0px' });
+    host.querySelectorAll('.pg').forEach((el) => pageObserver.observe(el));
+}
+
+function setView(v) {
+    view = v;
+    document.getElementById('out').hidden = (v !== 'list');
+    const raw = document.getElementById('raw');
+    raw.hidden = (v !== 'raw');
+    document.querySelectorAll('.view').forEach((b) =>
+        b.setAttribute('aria-pressed', String(b.dataset.v === v)));
+    if (v === 'raw') renderRaw();
+    else if (pageObserver) pageObserver.disconnect();
+}
+
+function show(fullText, name) {
+  const out = document.getElementById('out');
+  out.innerHTML = '<div class="busy">분석 중…</div>';
+  // Yield once so the message actually paints before the engine blocks the
+  // thread; on a tablet this run is seconds, not milliseconds.
+  setTimeout(() => {
+    try {
+      DATA = analyseFlight(fullText);
+      PAGE_MARKS = null;                 // marks belong to this document only
+      document.getElementById('intake').style.display = 'none';
+      header(name); segs(); setView('list'); render();
+    } catch (e) {
+      out.innerHTML = '<div class="err">분석에 실패했습니다: ' + esc(e && e.message) + '</div>';
+    }
+  }, 30);
+}
+
+async function openPdf(file) {
+  const out = document.getElementById('out');
+  out.innerHTML = '<div class="busy">PDF를 읽는 중…</div>';
+  try {
+    // The layout carries the text plus where every run of it sits, which is
+    // what lets the RAW view mark the real page. Samples have no PDF behind
+    // them, so LAYOUT stays null there and the RAW button stays disabled.
+    LAYOUT = await extractPdfLayout(file);
+    show(LAYOUT.fullText, file.name);
+  } catch (e) {
+    out.innerHTML = '<div class="err">PDF를 읽지 못했습니다: ' + esc(e && e.message) + '</div>';
+  }
+}
+
+document.getElementById('pick').addEventListener('click', () => document.getElementById('file').click());
+document.getElementById('file').addEventListener('change', (e) => {
+  if (e.target.files && e.target.files[0]) openPdf(e.target.files[0]);
+});
+document.getElementById('s223').addEventListener('click', () => {
+  if (typeof SAMPLE_AAR223_FULL_TEXT === 'undefined') return;
+  LAYOUT = null;              // bundled text has no PDF behind it
+  show(SAMPLE_AAR223_FULL_TEXT, 'AAR223');
+});
+document.getElementById('s202').addEventListener('click', () => {
+  if (typeof SAMPLE_AAR202_FULL_TEXT === 'undefined') return;
+  LAYOUT = null;
+  show(SAMPLE_AAR202_FULL_TEXT, 'AAR202');
+});
+
+const intake = document.getElementById('intake');
+['dragenter', 'dragover'].forEach((ev) => intake.addEventListener(ev, (e) => {
+  e.preventDefault(); intake.classList.add('drag');
+}));
+['dragleave', 'drop'].forEach((ev) => intake.addEventListener(ev, (e) => {
+  e.preventDefault(); intake.classList.remove('drag');
+}));
+intake.addEventListener('drop', (e) => {
+  const f = e.dataTransfer && e.dataTransfer.files && e.dataTransfer.files[0];
+  if (f) openPdf(f);
+});
+</script>
+</body>
+</html>

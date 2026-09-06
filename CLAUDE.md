@@ -15,21 +15,30 @@ curl -s "https://boeing00.github.io/NOTAM-Summary/index.html?cb=$RANDOM" | grep 
 
 | 파일 | 역할 |
 |---|---|
-| `index.html` | **앱 전체.** 약 3,000줄. 엔진·UI·스타일이 전부 여기 인라인 |
+| `notam_engine.js` | **엔진.** 순수 함수만. DOM·렌더·앱 상태 없음. 두 화면이 공유한다 |
+| `index.html` | 데스크톱 화면. UI·스타일·브리핑 렌더 |
+| `ipad.html` | 아이패드 화면. 목록 뷰(PACKAGE 1·3을 주제별로 묶음) + 원문 PDF 뷰 |
 | `aar223_text.js` / `aar202_text.js` | 번들 샘플. OFP 원문 전체를 JS 문자열 하나로 담고 있음 |
 | `sw.js`, `manifest.json` | PWA |
-| `notam_engine.js` | **빈 껍데기.** "NOT LOADED" 주석만 있음. 삭제 여부 미결 |
 | `python_cli/` | 별개의 파이썬 CLI. 앱과 공유 코드 없음 |
 
-`index.html` 하나뿐이므로 빌드 단계가 없다. 문법 검사는 이렇게:
+빌드 단계는 없다. 엔진은 평범한 `<script src>`로 로드되어 전역을 정의하고,
+파일 끝의 `module.exports`는 node에서만 발화한다(회귀 하네스용, 브라우저에선 무시).
+
+**엔진을 고치면 두 화면이 같이 바뀐다.** 그게 분리한 이유다.
 
 ```bash
+node --check notam_engine.js
 python -c "
 import io,re
 s=io.open('index.html',encoding='utf-8').read()
 io.open('chk.js','w',encoding='utf-8',newline='\n').write(re.findall(r'<script>([\s\S]*?)</script>',s)[-1])
 " && node --check chk.js && rm chk.js
 ```
+
+엔진 분리는 **동작이 바뀌면 안 되는 순수 이동**이었다. 회귀 하네스로 4편 PDF ×
+flat/lines 8회를 전후 대조해 바이트 단위 동일을 확인했다. 엔진을 다시 옮길 일이
+있으면 같은 방식으로 증명할 것.
 
 ## 절대 규칙
 
@@ -46,7 +55,62 @@ io.open('chk.js','w',encoding='utf-8',newline='\n').write(re.findall(r'<script>(
 항목을 **숨기지 않고** 순위와 라벨만 조정했다. 근거: `CZEG F4091/26`은 지명된
 픽스가 회랑이 아니라 경계 참조였다 — 숨겼으면 판단 근거가 사라졌을 것이다.
 
-## 교차 대조 엔진 (`index.html`)
+## 문서가 스스로 선언한 구조 — 추론하지 말고 읽을 것
+
+OFP는 NOTAM을 세 묶음으로 나눠 인쇄한다. 4편 샘플 전부 형식이 같다.
+
+| | 범위 | 태그 |
+|---|---|---|
+| PACKAGE 1 | 출발·목적지·목적지 교체 | `[DEP]` `[DEST]` `[ALTN]` |
+| PACKAGE 2 | 재출항·ETP·항로상 회항 공항 | `[REFILE]` `[ETP]` `[ERA]` |
+| PACKAGE 3 | 항로. `FIR:` 헤더가 붙는다 | 태그 없음 |
+
+종료 문구가 1번만 다르다 — `END OF PACKAGE 1`, `END OF NOTAM PACKAGE 2|3`.
+`parseNotamSections()`가 `END OF (?:NOTAM )?PACKAGE [123]`로 둘 다 받는다.
+
+그 안에 주제 헤더가 또 있다(`◼ RUNWAY`, `◼ RUNWAY LIGHT`, `◼ TAXIWAY`, `◼ NAVAID`,
+`◼ AIRWAY` … 4편 통틀어 18종). `NOTAM_CATEGORIES`가 이걸 13개 그룹으로 묶는다.
+**`<X> LIGHT`는 `<X>`와 같은 그룹이다** — 활주로 중심선등과 활주로 폐쇄는 같은 활주로고,
+그 활주로를 찾는 조종사는 둘 다 한자리에서 봐야 한다. 묶는 건 주제 기준,
+음영은 성격 기준(`evaluateAutoShading`)으로 **서로 독립**이다.
+
+**PACKAGE 2는 기본 분석 대상이 아니다** (지휘관 지시 2026-09-07). 요청이 있을 때만 켠다.
+단 **분석 제외지 목록 제외가 아니다** — 원문 목록에는 남기고 건수를 표시한다.
+빼도 리뷰 목록은 안 줄어든다(실측: 리뷰 89건 전부가 PACKAGE 3). 줄어드는 건 분량이다
+(AAR223 491 → 218건). 주의: 필드 18의 `RALT/KORD PANC RJCC`는 FPL에 신고된 공항인데
+문서상 PACKAGE 2의 `[ETP]`에 있어, 빼면 공항 통계에서 빠진다.
+
+주제 헤더는 **다음 NOTAM 헤더 전에 놓여 앞 NOTAM 본문으로 샌다.** `◼`가 나오면 블록을
+끊는다 — `[DEST]` 누출과 같은 계열이고, 안 끊으면 마지막 항목이 `... U/S ◼ RUNWAY LIGHT`가 된다.
+
+## 원문 PDF 위에 표시하기 (`ipad.html` 원문 뷰)
+
+`extractPdfLayout()`이 텍스트와 **좌표를 한 번에** 낸다. 조각마다 `fullText` 오프셋과
+페이지 위 상자(y는 위에서부터)를 갖고, NOTAM은 자기 문자범위(`at`/`to`)를 갖는다.
+둘을 겹치면 어느 쪽 어느 사각형을 칠할지 정해진다.
+
+`extractTextFromPdfFile()`은 이제 그 위의 얇은 껍데기다. **텍스트 조립이 한 곳이어야**
+엔진이 파싱하는 문자열과 오버레이가 색인하는 문자열이 갈라지지 않는다. 이 통합이
+텍스트를 한 바이트도 바꾸지 않았음을 실 PDF 4편으로 확인했다(구현 전후 문자열 동일,
+조각 143,150개 오프셋 정합 100%).
+
+주의할 점 둘:
+
+- **`join("\n")`과 hasEOL마다 `"\n"` 덧붙이기는 페이지 끝에서 갈린다.** 마지막 조각이
+  줄을 끝내면 후자에만 개행이 남는다. 끝의 개행 하나를 떼야 같아진다.
+- **페이지는 보이는 것만 그리고 멀어지면 놓는다.** 99쪽을 레티나로 다 들고 있으면
+  250MB가 넘어 사파리가 탭을 죽인다. `IntersectionObserver`로 앞뒤 한 화면만 그리면
+  25쪽에서 80쪽으로 건너뛰어도 캔버스 18개 · 45MB로 평평하다.
+
+한 NOTAM이 페이지 경계를 넘으면 양쪽 페이지에 표시된다(`A7258/26`이 25·26쪽에 걸친다).
+그래서 표시 개수(527)가 NOTAM 수(491)보다 많다.
+
+## 교차 대조 엔진 (`notam_engine.js`)
+
+진입점은 둘이다. `analyseFlight(fullText)`는 **전 항목**을 판정해 돌려주고(순위·필터·절단
+없음 — 무엇을 보여줄지는 화면이 정한다), `buildCrossCheck()`는 상위 40건 요약을 낸다.
+둘 다 `buildCrossCheckContext()`로 같은 ctx를 만든다 — **두 화면이 비행을 다르게
+구성하면 안 된다.**
 
 ### 파이프라인
 
@@ -139,6 +203,18 @@ RJJJ 형식(`1)  L512  2608291200/2608292200  MEA`)만 읽는다.
 
 **NOTAM ID는 유일하지 않다.** 행 상태는 위치 기반 키로.
 
+**줄 앵커를 쓰는 파서는 flat 텍스트에서 조용히 0건이었다.** `extractTextFromPdfFile`이
+pdf.js 조각을 `join(" ")`로 이어붙여 줄바꿈이 하나도 없었다. `parseOfpWaypoints`(항상 0행),
+`parseCdrTable`(`/^\s*\d+\)/gm`, 항상 0건), `parseDailyWindow`(`/^D\)/m`, 항상 null)가
+**프로덕션에서 통째로 죽어 있었다.** 번들 샘플에는 줄바꿈이 있어 데모만 동작했다.
+지금은 `item.hasEOL`로 줄을 복원한다 — 업로드 경로와 데모 경로가 같은 형태를 만든다.
+
+**활주로는 두 방향을 한꺼번에 고시한다.** `RWY 04R/22L CLSD`. CRITICAL 판정 정규식에
+`(?:/\d{1,2}[LCR]?)?`가 없어 **전면 폐쇄를 전부 놓쳤다** — 출발 당일 교차 활주로 두 개를
+닫은 `KJFK A7259/26`·`A7258/26`, CLAUDE.md가 1순위로 적어둔 `KLAX A4733/26`까지.
+단, 넓히면 `TWY FB BTN RWY 04L/22R AND RWY 04R/22L CLSD`가 딸려 온다 — 닫힌 건
+유도로다. `E)` 절이 `TWY`로 시작하면 제외한다.
+
 ## 작업 함정 (에이전트용)
 
 **Bash heredoc이 백슬래시를 먹는다.** 이 세션에서 여러 번 정규식을 깨뜨렸다
@@ -159,8 +235,17 @@ RJJJ 형식(`1)  L512  2608291200/2608292200  MEA`)만 읽는다.
 | PAZA 진입 | — | `OMOTO` 48.995N 160.012E | `OMOTO` |
 | 항법시설 | CAM BTT SDE GTC KAE | GTC OAK | — |
 
-AAR224는 `NOTAM-Summary`에 없다 — `pilot_Briefing_tool`의
-`frontend/src/data/sample_aar224_kjfk.json`에 있다(별개 저장소).
+**회귀 샘플 PDF 4편** (지휘관 지정 2026-09-07). 파일명이 편명과 어긋나니 믿지 말 것.
+
+| `C:\Users\moons\Downloads\` | 편명 | 구간 | 쪽 |
+|---|---|---|---|
+| `ImportantFile223.pdf` | AAR223 | KJFK→RKSI | 99 |
+| `ImportantFile224 (1).pdf` | AAR224 | RKSI→KJFK | 94 |
+| `ImportantFile201.pdf` | **AAR203** | KLAX→RKSI | 72 |
+| `ImportantFile (1).pdf` | **AAR202** | RKSI→KLAX | 85 |
+
+전부 2026-08-29 DOF. 왕복 2쌍이라 방향별 회귀가 된다. 번들 샘플(`aar223_text.js`)로만
+검증하면 안 된다 — 업로드 경로를 재현하지 못한다.
 
 **`PAZA A2472/26` 판정 (손계산 검증됨)**
 - 2.A CZEG 지정 픽스: AAR223 `GOATS` ✅ / AAR224 `GAHAM` ✅
@@ -174,8 +259,21 @@ AAR224는 `NOTAM-Summary`에 없다 — `pilot_Briefing_tool`의
 
 ## 미결 사항
 
-1. **`notam_engine.js` 삭제 여부** — 지금은 "NOT LOADED" 주석뿐
-2. **RKRR 한국식 CDR2 표 파서** — `Z0632/26`. 구간 양 끝 지점이 우리 항로에 있는지로 매칭하면 됨
+1. **항로 폴리라인이 15항 대양점뿐이다** — `geoCheck`/`zoneCheck`에 들어가는
+   `ctx.route.pointList`는 15항의 `55N170W` 형태 토큰만 디코딩한 것이다(AAR223 10점,
+   AAR202 5점). OFP 웨이포인트 표에는 좌표가 65개 지점 다 있는데 쓰지 않는다.
+   증상이 화면에 그대로 찍힌다: `RKRR Z0479/26 이격 2728NM` — 한국 FIR NOTAM인데
+   비교할 점이 태평양 한복판밖에 없어서다. 육상 구간의 기하 판정은 지금 근거가 없다.
+2. **시각이 붙은 궤적이 없다** — 웨이포인트 표의 누적시각(4편 전부 100% 보유)을 궤적에
+   묶으면 "최근접 구간을 지나는 그 시각에 NOTAM이 유효한가"를 물을 수 있다. 지금 시간
+   판정은 비행 창 전체 대 FIR 진입 한 순간뿐이다. 기준점은 검증됐다 — `RKSI 14.59` +
+   ETD 0600Z = 2059Z = OFP 인쇄 ETA, 즉 **누적시각은 오프블록 기준**이고 `baseMs =
+   DOF + ETD`가 맞다. 택시시간 보정 불필요.
+3. **웨이포인트 표가 세 덩어리다** — 주항로, 회항/재출항표(누적시각이 리셋된다:
+   NODAN 12.34 다음 NANAC **00.16**), 그리고 주항로 재인쇄. 지금은
+   `ctx.wpMin[이름] = 분`을 뒤가 이기게 채우므로 **회항 시각이 주항로 시각을 덮어쓴다.**
+   단조증가 런으로 끊어야 한다.
+4. **RKRR 한국식 CDR2 표 파서** — `Z0632/26`. 구간 양 끝 지점이 우리 항로에 있는지로 매칭하면 됨
 3. **`ZENNA`/`SAYNT` 좌표 없음** — A2472/26 2.C 첫 대안은 판정 불가(둘째 좌표 대안이 충족되므로 실무상 무해)
 4. **localhost 전용 `SyntaxError: Unexpected token ')'`** — 내 변경 이전 HEAD에서도 재현, 라이브에는 없음. 환경 문제로 판단하고 손대지 않음
 
