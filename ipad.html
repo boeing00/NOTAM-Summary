@@ -574,6 +574,22 @@ const dayZ = (ms) => {
          String(d.getUTCMinutes()).padStart(2, '0') + 'Z';
 };
 
+/* A time span. The day is printed once when both ends fall on it - a pilot
+   reading "29일 1200Z–29일 2200Z" has to check twice that it really is one day. */
+const rangeZ = (a, b) => {
+  const A = dayZ(a), B = dayZ(b);
+  const [dA, tA] = A.split(' '), [dB, tB] = B.split(' ');
+  return dA === dB ? dA + ' ' + tA + '–' + tB : A + '–' + B;
+};
+
+/* Minutes, said the way a crew says them. Under an hour stays in minutes. */
+const mins = (m) => {
+  const n = Math.abs(Math.round(m));
+  if (n < 60) return n + '분';
+  const h = Math.floor(n / 60), r = n % 60;
+  return r ? h + '시간 ' + r + '분' : h + '시간';
+};
+
 /* A conditional route in full: which airway, which leg of OUR route sits on it,
    when it opens, when we are on it, and how much room is left at each end.
    "여유 523분" on its own hid the tighter of the two margins - AAR224 enters
@@ -585,14 +601,14 @@ function cdrDetail(c) {
           : c.verdict === 'OUTSIDE' ? '개방시간 밖'
           : c.verdict === 'PARTIAL' ? '일부만 개방시간 내' : '통과 시각을 몰라 판정 불가';
   const p = ['항공로 ' + c.awy + (legs ? ' · 우리 항로 구간 ' + legs : '')];
-  p.push('개방 ' + dayZ(c.open.from) + '–' + dayZ(c.open.to));
+  p.push('개방 ' + rangeZ(c.open.from, c.open.to));
   if (c.enter !== null && c.enter !== undefined) {
-    p.push('통과 예정 ' + dayZ(c.enter) + '–' + dayZ(c.exit));
+    p.push('통과 예정 ' + rangeZ(c.enter, c.exit));
     p.push(v);
     const inM = Math.round((c.enter - c.open.from) / 60000);
     const outM = Math.round((c.open.to - c.exit) / 60000);
-    p.push((inM >= 0 ? '개방 ' + inM + '분 후 진입' : '개방 ' + (-inM) + '분 전 진입') + ', ' +
-           (outM >= 0 ? '종료 ' + outM + '분 전 이탈' : '종료 ' + (-outM) + '분 후 이탈'));
+    p.push((inM >= 0 ? '개방 ' + mins(inM) + ' 후 진입' : '개방 ' + mins(inM) + ' 전 진입') + ', ' +
+           (outM >= 0 ? '종료 ' + mins(outM) + ' 전 이탈' : '종료 ' + mins(outM) + ' 후 이탈'));
   } else {
     p.push(v);
   }
