@@ -134,7 +134,17 @@
             }
 
             // 1. Lighting (ALS, PAPI, RCLL, TWY LGT, Stop Bar, etc.)
-            if (/\b(ALS|ALSF|MALSR|MALSF|SALS|SSALS|PAPI|VASI|RCLL|REDL|RTIL|TDZL|APPROACH LIGHT|TWY.*LGT|APRON.*LGT|O\T.*LGT|FLG LGT|STOP BAR.*TRIAL|ENTRY LGT.*U\/S|LGT U\/S|LIGHTING)\b/.test(upper)) {
+            // The old list matched specific phrasings - "TWY...LGT", "LGT U/S",
+            // "ENTRY LGT...U/S" - and so turned on word order. "RWY 04R LEAD
+            // OFF LGT AT TWY FB U/S" puts LGT before TWY and separates it from
+            // U/S, and fell through to be scored as an ordinary item; six more
+            // lead-on/lead-off and stop-bar NOTAMs did the same.
+            //
+            // A light is a light wherever the words fall, so match the light
+            // itself. Checked against all four sample flights: this shades
+            // exactly the seven that were being missed and nothing else, and
+            // runway closures are unaffected because CRITICAL is tested first.
+            if (/\b(?:ALS|ALSF|MALSR|MALSF|SALS|SSALS|PAPI|VASI|RCLL|REDL|RTIL|TDZL|LGT|LGTS|LIGHT|LIGHTS|LIGHTING|STOP BAR)\b/.test(upper)) {
                 let detail = "등화(Lighting) 정비/결함/시범운영 고시. 주간 운항 또는 정밀 계기접근 최저치(Minima)에 지장을 주지 않는 일반 등화 항목으로 자동 음영 처리함.";
                 if (upper.includes("PAPI") || upper.includes("VASI")) {
                     detail = "시각 진입각 지시등(PAPI/VASI) 결함/점검 고시. 계기접근(ILS/RNAV) 및 CAT I/II/III 착륙 최저치 산정에 영향이 없어 음영 처리함.";
@@ -400,6 +410,79 @@
             [/^OTHER$/,                                    "OTHER",     "기타"]
         ];
 
+        /* --------------------------------------------------------------
+         * What a NOTAM is actually about
+         *
+         * The subject heading says "RUNWAY"; it does not say which runway. A
+         * pilot departing 04R wants the closure, the lead-off light and the
+         * marking work on 04R together, and nothing about 13L.
+         *
+         * 04R and 22L are the same strip from opposite ends, so they are one
+         * subject. Reciprocal = n + 18 wrapped into 1..36, with L and R
+         * swapped; C and a bare number stay as they are. Both ends are then
+         * sorted into one canonical key, which is why "RWY 04R LEAD OFF LGT"
+         * and "RWY 04R/22L CLSD" land in the same group.
+         * -------------------------------------------------------------- */
+
+        function reciprocalEnd(end) {
+            const m = String(end).match(/^(\d{1,2})([LCR])?$/);
+            if (!m) return null;
+            const n = parseInt(m[1], 10);
+            if (!(n >= 1 && n <= 36)) return null;
+            const r = ((n + 17) % 36) + 1;
+            const side = m[2] === "L" ? "R" : m[2] === "R" ? "L" : (m[2] || "");
+            return String(r).padStart(2, "0") + side;
+        }
+
+        function runwayKey(end) {
+            const m = String(end).match(/^(\d{1,2})([LCR])?$/);
+            if (!m) return null;
+            const self = String(parseInt(m[1], 10)).padStart(2, "0") + (m[2] || "");
+            const other = reciprocalEnd(end);
+            if (!other) return null;
+            return self <= other ? self + "/" + other : other + "/" + self;
+        }
+
+        /**
+         * The subject a NOTAM should be filed under inside its category:
+         * a physical runway, or a taxiway. Returns null when the text names
+         * neither - such an item is grouped as "지정 없음" rather than guessed at.
+         */
+        function extractSubject(raw, categoryKey) {
+            const up = String(raw || "").toUpperCase();
+            const body = up.slice(Math.max(0, up.indexOf("E)")));
+
+            const rwys = [];
+            const twys = [];
+            const rwyRe = /\b(?:RWY|RUNWAY)\s+(\d{1,2}[LCR]?(?:\s*\/\s*\d{1,2}[LCR]?)*)/g;
+            let m;
+            while ((m = rwyRe.exec(body)) !== null) {
+                m[1].split("/").forEach((e) => {
+                    const k = runwayKey(e.trim());
+                    if (k && rwys.indexOf(k) < 0) rwys.push(k);
+                });
+            }
+            const twyRe = /\b(?:TWY|TAXIWAY|TXL)\s+([A-Z]{1,2}\d{0,2})\b/g;
+            while ((m = twyRe.exec(body)) !== null) {
+                if (twys.indexOf(m[1]) < 0) twys.push(m[1]);
+            }
+
+            const asRwy = () => ({ type: "RWY", key: rwys[0], label: "RWY " + rwys[0], all: rwys });
+            const asTwy = () => ({ type: "TWY", key: twys[0], label: "TWY " + twys[0], all: twys });
+
+            // A taxiway NOTAM routinely names runways to say where the taxiway
+            // is - "TWY FB BTN RWY 04L/22R AND RWY 04R/22L CLSD" closes TWY FB.
+            // Taking the first runway found would file it under a runway it is
+            // not about. The heading already says which kind of thing this is,
+            // so let it decide, and fall back to runway-first only when the
+            // heading says neither.
+            if (categoryKey === "TAXIWAY") return twys.length ? asTwy() : (rwys.length ? asRwy() : null);
+            if (categoryKey === "RUNWAY") return rwys.length ? asRwy() : (twys.length ? asTwy() : null);
+            if (rwys.length) return asRwy();
+            if (twys.length) return asTwy();
+            return null;
+        }
+
         function categoryGroup(label) {
             const norm = String(label || "").replace(/\s+/g, " ").trim();
             for (const [re, key, ko] of NOTAM_CATEGORIES) {
@@ -548,6 +631,7 @@
                 if (cut2 > 0) spanLen = cut2;
 
                 const cat = catAt(cur.start);
+                const subj = extractSubject(rawBlock, cat ? cat.key : null);
 
                 list.push({
                     index: idx++,
@@ -560,6 +644,12 @@
                     categoryKey: cat ? cat.key : null,
                     categoryKo: cat ? cat.ko : null,
                     categoryLabel: cat ? cat.label : null,
+                    // Which runway / taxiway, so a category can be filed by the
+                    // thing itself rather than by its heading alone.
+                    subjectType: subj ? subj.type : null,
+                    subjectKey: subj ? subj.key : null,
+                    subjectLabel: subj ? subj.label : null,
+                    subjectAll: subj ? subj.all : null,
                     at: at,
                     to: at + spanLen,
                     autoShaded: auto.isShaded,
@@ -912,6 +1002,33 @@
          * Separate from geoCheck: that one asks how close we pass, this one
          * asks whether we go in, which is what a prohibition turns on.
          */
+        /**
+         * Legs safe to hand to a planar crossing test, in the frame centred on
+         * `lon0`.
+         *
+         * shiftLon() folds every longitude into one 360-degree frame. A leg
+         * lying on the far side of that fold comes out with its ends at
+         * opposite edges - +179 and -179 - and the straight line between them
+         * sweeps the entire frame, crossing whatever shape sits in the middle.
+         * With field 15's handful of oceanic points this never showed; a
+         * 60-point track spanning 200 degrees of longitude hits it.
+         *
+         * No real leg between consecutive waypoints spans 90 degrees of
+         * longitude, so a span that large is the fold, not a flight path. Such
+         * a leg is also necessarily far from the shape, so dropping it cannot
+         * hide a crossing.
+         */
+        function planarLegs(pts, lon0) {
+            const out = [];
+            for (let i = 0; i < pts.length - 1; i += 1) {
+                const a = shiftLon(pts[i].lon, lon0);
+                const b = shiftLon(pts[i + 1].lon, lon0);
+                if (Math.abs(a - b) > 90) continue;
+                out.push([pts[i], pts[i + 1]]);
+            }
+            return out;
+        }
+
         function zoneCheck(raw, routePts) {
             const banned = extractProhibitedAreas(raw);
             const gates = extractGateSegments(raw);
@@ -919,10 +1036,10 @@
             if (routePts.length < 2) return null;
 
             const crossesShape = (poly, lon0) => {
-                for (let i = 0; i < routePts.length - 1; i += 1) {
+                for (const [A, B] of planarLegs(routePts, lon0)) {
                     for (let j = 0; j < poly.length; j += 1) {
                         const k = (j + 1) % poly.length;
-                        if (segCross(routePts[i], routePts[i + 1], poly[j], poly[k], lon0)) return true;
+                        if (segCross(A, B, poly[j], poly[k], lon0)) return true;
                     }
                 }
                 return false;
@@ -945,8 +1062,8 @@
             const gateOut = gates.map((g) => {
                 const lon0 = g.a.lon;
                 let crosses = false;
-                for (let i = 0; i < routePts.length - 1 && !crosses; i += 1) {
-                    if (segCross(routePts[i], routePts[i + 1], g.a, g.b, lon0)) crosses = true;
+                for (const [A, B] of planarLegs(routePts, lon0)) {
+                    if (segCross(A, B, g.a, g.b, lon0)) { crosses = true; break; }
                 }
                 let nearest = Math.min(polylineNm(routePts, g.a), polylineNm(routePts, g.b));
                 routePts.forEach((p) => { nearest = Math.min(nearest, segNm(g.a, g.b, p)); });
@@ -1099,17 +1216,106 @@
                 deduped.push(w);
             }
 
-            // "FIR" is this table's own placeholder name for an unnamed
-            // boundary-crossing point - not a fix, just this row's way of
-            // saying "no named fix sits here". "TOC"/"TOD"/"ETPn" are the
-            // OFP software's own computed points (top of climb, top of
-            // descent, equal-time points): universal dispatch abbreviations,
-            // never ICAO fix idents, and never something field 15 files.
-            // Coordinates and times on every remaining row are left exactly
-            // as printed - only these software-generated placeholder names
-            // are dropped, nothing about a real fix is touched.
-            const PSEUDO_NAME = /^(?:FIR|TOC|TOD|ETP\d*)$/;
-            return deduped.filter((w) => !PSEUDO_NAME.test(w.name));
+            // A row's name and a row's position are two different facts, and
+            // only the name can be junk.
+            //
+            // "FIR" is this table's own placeholder for an unnamed boundary
+            // crossing. "TOC"/"TOD"/"ETPn" are the OFP software's computed
+            // points (top of climb, top of descent, equal-time point) -
+            // dispatch abbreviations, never ICAO idents, never filed in
+            // field 15. None of them may be matched against route fixes.
+            //
+            // But every one of them is a real place the aircraft flies over,
+            // with real printed coordinates. Dropping the rows punched holes
+            // in the only accurate track this document contains, so they are
+            // kept and marked instead. `kind` says what a consumer may use a
+            // row for: geometry takes every row with coordinates, name
+            // matching takes only 'fix' and 'oceanic'.
+            const PSEUDO_NAME = /^(?:FIR|TOC|TOD|ETP\d*|T\/C|T\/D)$/;
+            const OCEANIC = /^(?:\d{4}[NSEW]|\d{2}[NS]\d{2})$/;   // 5075N, 63N00
+            return deduped.map((w, i) => {
+                let kind = "other";
+                if (PSEUDO_NAME.test(w.name)) kind = "pseudo";
+                else if (OCEANIC.test(w.name)) kind = "oceanic";
+                else if (/^[A-Z]{5}$/.test(w.name)) kind = "fix";
+                else if (/^[A-Z]{4}$/.test(w.name)) kind = "airport";
+                return Object.assign({ seq: i, kind }, w);
+            });
+        }
+
+        /**
+         * The waypoint table is not one table.
+         *
+         * An OFP prints the planned route, then a diversion or re-file route
+         * whose cumulative clock restarts at zero, and on some packages the
+         * planned route again. Cumulative minutes only ever increase within
+         * one route, so a drop is where one ends and the next begins.
+         *
+         * This matters beyond tidiness: `ctx.wpMin` is keyed by fix name and
+         * written last-wins, so any fix appearing in both tables had its
+         * planned time silently overwritten by its diversion time.
+         */
+        function splitWaypointRuns(rows) {
+            const runs = [];
+            let cur = [];
+            let last = -1;
+            for (const w of rows) {
+                if (w.min !== null) {
+                    if (w.min < last) { if (cur.length) runs.push(cur); cur = []; }
+                    last = w.min;
+                }
+                cur.push(w);
+            }
+            if (cur.length) runs.push(cur);
+            if (!runs.length) return { primary: [], others: [] };
+
+            // The planned route is the longest run - a diversion is by nature
+            // a tail, and a re-print is a duplicate the dedup above removed.
+            let best = 0;
+            runs.forEach((r, i) => { if (r.length > runs[best].length) best = i; });
+            return { primary: runs[best], others: runs.filter((_, i) => i !== best) };
+        }
+
+        // Consecutive OFP waypoints sit at most a few hundred miles apart, even
+        // on an oceanic track. A much larger step means a row was misread, not
+        // that the aircraft teleported. The gap is reported rather than patched:
+        // this file does not invent positions.
+        const TRACK_GAP_NM = 1200;
+
+        /**
+         * The flown track: an ordered polyline with a time on every point.
+         *
+         * Field 15 carries only the handful of oceanic lat/long points that are
+         * filed by coordinate - 10 on the JFK leg, 5 on the LAX one - and none
+         * at all over land. Measuring a Korean NOTAM against that set reported
+         * the nearest approach as 2,728NM, because the closest thing to Korea
+         * in it was a point in the middle of the Pacific. The waypoint table
+         * has all 60-odd, so it is preferred and field 15 is the fallback.
+         */
+        function buildRouteTrack(fullText, fallbackPts) {
+            const rows = parseOfpWaypoints(fullText);
+            const { primary, others } = splitWaypointRuns(rows);
+            const pts = primary.filter((w) =>
+                typeof w.lat === "number" && typeof w.lon === "number" &&
+                Math.abs(w.lat) <= 90 && Math.abs(w.lon) <= 180);
+
+            const gaps = [];
+            for (let i = 1; i < pts.length; i += 1) {
+                const nm = gcNm(pts[i - 1], pts[i]);
+                if (nm > TRACK_GAP_NM) {
+                    gaps.push({ from: pts[i - 1].name, to: pts[i].name, nm: Math.round(nm) });
+                }
+            }
+
+            const useTrack = pts.length >= 2;
+            return {
+                primary,
+                others,
+                points: pts,
+                gaps,
+                source: useTrack ? "OFP" : "FPL15",
+                geomPts: useTrack ? pts : (fallbackPts || [])
+            };
         }
 
         /** Off-blocks, as minutes past midnight UTC. */
@@ -1381,6 +1587,354 @@
             return { mine, theirs: theirs.slice(0, 10) };
         }
 
+        /* ==============================================================
+         * Stated conditions
+         *
+         * Some NOTAMs do not describe an area - they set out numbered rules a
+         * flight plan has to satisfy. PAZA A2472/26 (USER PREFERRED ROUTE
+         * FLIGHT PLANNING GUIDELINES) is the type case: 5 clauses, sub-lettered,
+         * each naming fixes, airways, levels or times.
+         *
+         * Reading such a clause is not something this file may do. Testing one
+         * is - "is GOATS among the fixes we filed", "is NATES east of NIKLL",
+         * "is our cruise band at or below FL310" are set membership and
+         * arithmetic, the documented exception.
+         *
+         * So every clause is listed, and each gets one of:
+         *   충족       a test ran on document data and passed
+         *   확인 필요   a test ran and did not find what the clause requires
+         *   해당 없음   the clause's own precondition is false for this flight
+         *   판정 불가   an input the test needs is not in this document
+         *   직접 확인   no mechanical test exists for this clause's wording
+         *
+         * "확인 필요" is deliberately not "위반". A clause can fail its test
+         * because our route parse is incomplete, and a false alarm costs as
+         * much as a miss. What is shown is what was computed, with its inputs.
+         * ============================================================== */
+
+        /** Numbered clauses: "2." then "A.", including mid-line markers. */
+        function splitClauses(body) {
+            const flat = String(body || "").replace(/\s+/g, " ").trim();
+            const out = [];
+            const top = /(?:^|\s)(\d)\.\s(?=[A-Z])/g;
+            const bounds = [];
+            let m;
+            while ((m = top.exec(flat)) !== null) bounds.push({ n: m[1], at: m.index + m[0].length - m[1].length - 2 });
+            for (let i = 0; i < bounds.length; i += 1) {
+                const from = bounds[i].at;
+                const to = i + 1 < bounds.length ? bounds[i + 1].at : flat.length;
+                const chunk = flat.slice(from, to);
+                const head = bounds[i].n;
+
+                const sub = /(?:^|\s)([A-Z])\.\s(?=[A-Z])/g;
+                const sb = [];
+                let s;
+                while ((s = sub.exec(chunk)) !== null) sb.push({ L: s[1], at: s.index + s[0].length - 3 });
+                if (!sb.length) { out.push({ ref: head, text: chunk.trim() }); continue; }
+                if (sb[0].at > 0) out.push({ ref: head, text: chunk.slice(0, sb[0].at).trim() });
+                for (let j = 0; j < sb.length; j += 1) {
+                    const f = sb[j].at;
+                    const t = j + 1 < sb.length ? sb[j + 1].at : chunk.length;
+                    out.push({ ref: head + "." + sb[j].L, text: chunk.slice(f, t).trim() });
+                }
+            }
+            return out;
+        }
+
+        /** Every fix name this flight actually files or overflies. */
+        function routeFixNames(ctx) {
+            const s = new Set();
+            ctx.route.fixes.forEach((f) => s.add(f));
+            ctx.route.navaids.forEach((f) => s.add(f));
+            (ctx.track ? ctx.track.primary : []).forEach((w) => {
+                if (w.kind === "fix" || w.kind === "oceanic") s.add(w.name);
+            });
+            return s;
+        }
+
+        /** Coordinates for a named point, only if this document printed them. */
+        function fixCoord(ctx, name) {
+            const rows = ctx.track ? ctx.track.primary : [];
+            for (const w of rows) {
+                if (w.name === name && typeof w.lat === "number" && typeof w.lon === "number") return w;
+            }
+            return null;
+        }
+
+        /** Field 15 as an ordered token list, DCT and speed/level groups removed. */
+        function routeSequence(ctx) {
+            const src = ctx.fpl && ctx.fpl.route ? ctx.fpl.route : "";
+            return String(src).toUpperCase()
+                .replace(/\/[NMK]\d{3,4}[FSAM]\d{3,4}/g, " ")
+                .split(/[^A-Z0-9]+/)
+                .filter((t) => t && t !== "DCT");
+        }
+
+        /**
+         * Does the route go A then B, with nothing filed between them?
+         *
+         * This is the difference between a fix and a routing. A0176/26 lists
+         * "FIORD, CHAPO, FANES, GOATS DCT FYU" as not available. Read as four
+         * fixes it condemns GOATS - which is the very fix clause 1 of the same
+         * NOTAM requires ("ON OR N OF GOATS DCT BTT"), and which AAR223 files.
+         * What is unavailable is the leg GOATS-FYU, not the point GOATS.
+         */
+        function hasLeg(seq, a, b) {
+            for (let i = 0; i < seq.length - 1; i += 1) {
+                if (seq[i] === a && seq[i + 1] === b) return true;
+            }
+            return false;
+        }
+
+        /** "GOATS DCT FYU" -> a leg; "FIORD" -> a point. */
+        function parseRouteItem(txt) {
+            const toks = String(txt).trim().split(/\s+/).filter((t) => t && t !== "DCT");
+            if (toks.length >= 2 && toks.every((t) => /^[A-Z0-9]{2,5}$/.test(t))) {
+                return { kind: "leg", from: toks[0], to: toks[toks.length - 1], toks };
+            }
+            if (toks.length === 1 && /^[A-Z0-9]{2,5}$/.test(toks[0])) {
+                return { kind: "point", name: toks[0] };
+            }
+            return null;
+        }
+
+        /** Where the flight crosses into `fir`, from the waypoint table. */
+        function firEntryPoint(ctx, fir) {
+            const rows = ctx.track ? ctx.track.primary : [];
+            for (const w of rows) {
+                if (w.fir === fir && typeof w.lat === "number" && typeof w.lon === "number") return w;
+            }
+            return null;
+        }
+
+        function checkStatedConditions(raw, ctx, station) {
+            const up = String(raw || "").toUpperCase();
+            const eIdx = up.indexOf("E)");
+            const body = eIdx >= 0 ? up.slice(eIdx + 2) : up;
+            const clauses = splitClauses(body);
+            if (clauses.length < 2) return null;
+
+            const ours = routeFixNames(ctx);
+            const results = [];
+
+            for (const c of clauses) {
+                const t = c.text;
+                let r = null;
+
+                // A. "<FIR> FIR: ... MUST FLT PLAN OVER ONE OF THE FOLLOWING
+                //     FIXES: X, Y, Z ... OR W."
+                const listM = t.match(/MUST\s+FLT\s+PLAN\s+OVER\s+ONE\s+OF\s+THE\s+FOLLOWING\s+FIXES?:?\s+([A-Z0-9,\s]+?)(?:\.|$)/);
+                if (listM) {
+                    const wanted = listM[1].split(/[,\s]+/)
+                        .filter((x) => /^[A-Z]{5}$/.test(x) && x !== "OR");
+                    const firM = t.match(/\b([A-Z]{4})\s+FIR\b/);
+                    const fir = firM ? firM[1] : null;
+                    if (fir && !ctx.firs.has(fir)) {
+                        r = { verdict: "NA", why: fir + " FIR를 통과하지 않는다" };
+                    } else {
+                        const hit = wanted.filter((f) => ours.has(f));
+                        r = hit.length
+                            ? { verdict: "OK", why: "지정 픽스 중 " + hit.join(", ") + "를 비행계획에 포함", evidence: hit }
+                            : { verdict: "CHECK", why: "지정 " + wanted.length + "개 픽스 중 우리 항로에 있는 것이 없다", evidence: wanted };
+                        if (fir) r.why = fir + " FIR · " + r.why;
+                    }
+                }
+
+                // B. "JOIN <AWY> OVER OR <E|W|N|S> OF WAYPOINT <FIX>"
+                if (!r) {
+                    const joinM = t.match(/JOIN\s+([A-Z]{1,2}\d{1,3})\s+OVER\s+OR\s+([NSEW])\s+OF\s+(?:WAYPOINT\s+)?([A-Z]{5})/);
+                    if (joinM) {
+                        const [, awy, dir, ref] = joinM;
+                        if (!ctx.route.airways.has(awy)) {
+                            r = { verdict: "NA", why: "항공로 " + awy + "를 사용하지 않는다" };
+                        } else {
+                            const leg = ctx.legs.find((l) => l.awy === awy);
+                            const joinAt = leg ? leg.from : null;
+                            const a = joinAt ? fixCoord(ctx, joinAt) : null;
+                            const b = fixCoord(ctx, ref);
+                            if (!a || !b) {
+                                r = {
+                                    verdict: "UNKNOWN",
+                                    why: "좌표가 문서에 없다: " + [!a ? (joinAt || "합류 지점") : null, !b ? ref : null]
+                                        .filter(Boolean).join(", ")
+                                };
+                            } else {
+                                const ok = dir === "E" ? shiftLon(a.lon, b.lon) >= 0
+                                         : dir === "W" ? shiftLon(a.lon, b.lon) <= 0
+                                         : dir === "N" ? a.lat >= b.lat : a.lat <= b.lat;
+                                const KO = { E: "동", W: "서", N: "북", S: "남" };
+                                r = {
+                                    verdict: ok ? "OK" : "CHECK",
+                                    why: awy + " 합류점 " + joinAt + "(" + fmtLL(a) + ")가 " + ref +
+                                         "(" + fmtLL(b) + ")보다 " + KO[dir] + (ok ? "쪽 — 조건 충족" : "쪽이 아니다"),
+                                    evidence: [joinAt, ref]
+                                };
+                            }
+                        }
+                    }
+                }
+
+                // C. "CROSS <A>, <B> OR <C> AT OR BLW FL310, OR AT OR ABV FL390"
+                if (!r) {
+                    const lvlM = t.match(/CROSS\s+([A-Z]{5}(?:\s*,\s*[A-Z]{5})*(?:\s+OR\s+[A-Z]{5})?)\s+AT\s+OR\s+(BLW|ABV)\s+FL\s?(\d{3})(?:\s*,?\s*OR\s+AT\s+OR\s+(BLW|ABV)\s+FL\s?(\d{3}))?/);
+                    if (lvlM) {
+                        const pts = lvlM[1].split(/[,\s]+|\s+OR\s+/).filter((x) => /^[A-Z]{5}$/.test(x));
+                        const on = pts.filter((p) => ours.has(p));
+                        if (!on.length) {
+                            r = { verdict: "NA", why: pts.join(", ") + " 중 우리 항로에 있는 지점이 없다" };
+                        } else if (!ctx.levels) {
+                            r = { verdict: "UNKNOWN", why: "계획 고도를 읽지 못했다" };
+                        } else {
+                            const bands = [[lvlM[2], +lvlM[3]]];
+                            if (lvlM[4]) bands.push([lvlM[4], +lvlM[5]]);
+                            const ok = bands.some(([kind, fl]) =>
+                                kind === "BLW" ? ctx.levels.max <= fl : ctx.levels.min >= fl);
+                            r = {
+                                verdict: ok ? "OK" : "CHECK",
+                                why: on.join(", ") + " 통과 · 계획 FL" + ctx.levels.min + "–" + ctx.levels.max +
+                                     " vs " + bands.map(([k, f]) => (k === "BLW" ? "FL" + f + " 이하" : "FL" + f + " 이상")).join(" 또는 "),
+                                evidence: on
+                            };
+                        }
+                    }
+                }
+
+                // D. "CROSS <A>, <B> OR <C> BTN 0500 UTC AND 2300 UTC"
+                if (!r) {
+                    const timeM = t.match(/CROSS\s+([A-Z]{5}(?:\s*,\s*[A-Z]{5})*(?:\s+OR\s+[A-Z]{5})?)\s+BTN\s+(\d{4})\s*UTC\s+AND\s+(\d{4})\s*UTC/);
+                    if (timeM) {
+                        const pts = timeM[1].split(/[,\s]+|\s+OR\s+/).filter((x) => /^[A-Z]{5}$/.test(x));
+                        const on = pts.filter((p) => ours.has(p));
+                        if (!on.length) {
+                            r = { verdict: "NA", why: pts.join(", ") + " 중 우리 항로에 있는 지점이 없다" };
+                        } else if (ctx.baseMs === null) {
+                            r = { verdict: "UNKNOWN", why: "DOF/ETD를 읽지 못해 통과 시각을 낼 수 없다" };
+                        } else {
+                            const win = [+timeM[2].slice(0, 2) * 60 + +timeM[2].slice(2),
+                                         +timeM[3].slice(0, 2) * 60 + +timeM[3].slice(2)];
+                            const times = on.map((p) => ({ p, min: ctx.wpMin[p] }))
+                                            .filter((x) => x.min !== undefined && x.min !== null);
+                            if (!times.length) {
+                                r = { verdict: "UNKNOWN", why: on.join(", ") + "의 통과 시각이 표에 없다" };
+                            } else {
+                                const bad = times.filter((x) => {
+                                    const utc = (Math.floor(ctx.baseMs / 60000) + x.min) % 1440;
+                                    return !inAnyWindow(utc, [win]);
+                                });
+                                r = {
+                                    verdict: bad.length ? "CHECK" : "OK",
+                                    why: times.map((x) => x.p + " " +
+                                        hhmm((Math.floor(ctx.baseMs / 60000) + x.min) % 1440) + "Z").join(", ") +
+                                        " vs " + timeM[2] + "–" + timeM[3] + "Z",
+                                    evidence: on
+                                };
+                            }
+                        }
+                    }
+                }
+
+                // E. "MUST BE ESTABLISHED EITHER: (A) ON OR N OF GOATS DCT BTT
+                //     (B) ON OR S OF ORT J124 GKN DTOUR"
+                //    Satisfied when the route actually flies one of the stated
+                //    routings. Alternatives are numbered (A)/(B) in the text.
+                if (!r && /MUST\s+BE\s+ESTABLISHED\s+EITHER/.test(t)) {
+                    // "FLTS ENTERING ANCHORAGE FIR N OF 620000N1410000W ..."
+                    // The clause binds only flights entering on the stated
+                    // side. AAR202 crosses into PAZA at OMOTO, 49N - thirteen
+                    // degrees south of the line - so the routing it demands is
+                    // not a requirement on that flight at all, and reporting it
+                    // as unmet would be a false alarm on a safety item.
+                    const preM = t.match(/ENTERING\s+[A-Z]+\s+FIR\s+([NSEW])\s+OF\s+(\d{6}[NS]\d{7}[EW])/);
+                    if (preM) {
+                        const line = decodeLatLon(preM[2]);
+                        const entry = station ? firEntryPoint(ctx, station) : null;
+                        if (!line || !entry) {
+                            results.push({ ref: c.ref, text: c.text, verdict: "UNKNOWN",
+                                why: entry ? "기준 좌표를 읽지 못했다"
+                                           : (station || "해당 FIR") + " 진입 지점이 웨이포인트 표에 없다" });
+                            continue;
+                        }
+                        const side = preM[1];
+                        const applies = side === "N" ? entry.lat > line.lat
+                                      : side === "S" ? entry.lat < line.lat
+                                      : side === "E" ? shiftLon(entry.lon, line.lon) > 0
+                                                     : shiftLon(entry.lon, line.lon) < 0;
+                        if (!applies) {
+                            const KO = { N: "북", S: "남", E: "동", W: "서" };
+                            results.push({ ref: c.ref, text: c.text, verdict: "NA",
+                                why: station + " 진입 " + entry.name + "(" + fmtLL(entry) + ")는 기준 " +
+                                     fmtLL(line) + "의 " + KO[side] + "쪽이 아니다 — 이 조항의 적용 대상이 아니다" });
+                            continue;
+                        }
+                    }
+
+                    const alts = [];
+                    const altRe = /\(([A-Z])\)\s*(?:ON\s+OR\s+[NSEW]\s+OF\s+)?([A-Z0-9][A-Z0-9\s]{2,60}?)(?=\s*\(|$)/g;
+                    let a;
+                    while ((a = altRe.exec(t)) !== null) {
+                        const item = parseRouteItem(a[2]);
+                        if (item) alts.push({ tag: a[1], item, text: a[2].trim() });
+                    }
+                    if (alts.length) {
+                        const seq = routeSequence(ctx);
+                        const met = alts.filter((x) => x.item.kind === "leg"
+                            ? hasLeg(seq, x.item.from, x.item.to)
+                            : ours.has(x.item.name));
+                        r = met.length
+                            ? { verdict: "OK", why: "지정 경로 (" + met[0].tag + ") " + met[0].text + " 를 그대로 비행계획에 반영",
+                                evidence: met.map((x) => x.text) }
+                            : { verdict: "CHECK", why: "지정 대안 " + alts.map((x) => "(" + x.tag + ") " + x.text).join(" / ") +
+                                " 중 비행계획과 일치하는 것을 찾지 못했다" };
+                    }
+                }
+
+                // F. "THE FOLLOWING RTES/FIXES ARE NOT AVBL: (A) ... (B) ..."
+                //    A multi-token entry is a leg, not a list of fixes.
+                if (!r && /(?:RTES?\/FIXES?|ROUTES?)\s+ARE\s+NOT\s+AVBL/.test(t)) {
+                    const items = [];
+                    const itRe = /\(([A-Z])\)\s*([^()]+?)(?=\s*\([A-Z]\)|$)/g;
+                    let a;
+                    while ((a = itRe.exec(t)) !== null) {
+                        a[2].split(",").forEach((piece) => {
+                            const it2 = parseRouteItem(piece);
+                            if (it2) items.push({ tag: a[1], item: it2, text: piece.trim() });
+                        });
+                    }
+                    if (items.length) {
+                        const seq = routeSequence(ctx);
+                        const used = items.filter((x) => x.item.kind === "leg"
+                            ? hasLeg(seq, x.item.from, x.item.to)
+                            : (ours.has(x.item.name) || ctx.route.airways.has(x.item.name)));
+                        r = used.length
+                            ? { verdict: "CHECK", why: "사용 불가로 고시된 " + used.map((x) => x.text).join(", ") + " 가 비행계획에 있다",
+                                evidence: used.map((x) => x.text) }
+                            : { verdict: "OK", why: "사용 불가 " + items.length + "건 중 비행계획에 포함된 것이 없다" };
+                    }
+                }
+
+                // "2. USER PREFERRED ROUTE ENTERY/EXIT BTN CZEG, CZVR OR KZAK
+                // FIR:" states no obligation of its own - it introduces the
+                // lettered clauses under it. Scoring it as something to check
+                // by hand buries the clauses that are.
+                if (!r && /:$/.test(t) && clauses.some((o) => o.ref.indexOf(c.ref + ".") === 0)) {
+                    r = { verdict: "HEADER", why: "" };
+                }
+
+                results.push(Object.assign({ ref: c.ref, text: c.text },
+                    r || { verdict: "MANUAL", why: "이 문장에 대한 기계 판정 규칙이 없다" }));
+            }
+
+            const scored = results.filter((x) => x.verdict !== "MANUAL");
+            return scored.length ? results : null;
+        }
+
+        /** A coordinate as a pilot writes it. */
+        function fmtLL(p) {
+            const la = Math.abs(p.lat).toFixed(2) + (p.lat >= 0 ? "N" : "S");
+            const lo = Math.abs(p.lon).toFixed(2) + (p.lon >= 0 ? "E" : "W");
+            return la + " " + lo;
+        }
+
         /**
          * Cross-checks one NOTAM against the flight. Returns evidence, never a
          * verdict: `needsReview` means "a human has to read this", not "violation".
@@ -1503,9 +2057,11 @@
             // are arithmetic, not reading comprehension.
             const area = extractGeoArea(raw);
             if (area) area.vert = parseVerticalBand(raw);
-            let geo = geoCheck(area, ctx.route.pointList, ctx.levels);
-            const zones = zoneCheck(raw, ctx.route.pointList);
+            const routePts = ctx.geomPts || ctx.route.pointList;
+            let geo = geoCheck(area, routePts, ctx.levels);
+            const zones = zoneCheck(raw, routePts);
             const cdr = cdrCheck(raw, ctx);
+            const conditions = checkStatedConditions(raw, ctx, item.station);
             // A prohibition states its own box. Showing the generic distance
             // block for the identical shape says the same thing twice.
             const samePts = (a, b) => a.length === b.length &&
@@ -1553,8 +2109,10 @@
                 limits,
                 limitWords,
                 area: dupZone ? null : area,
+                geomSource: ctx.geomSource || "FPL15",
                 zones,
                 cdr,
+                conditions,
                 geo,
                 firContext,
                 namedOurs: fixes.mine,
@@ -1595,12 +2153,183 @@
                 legs: routeLegs(routeField),
                 wp: parseOfpWaypoints(fullText)
             };
+            // The flown track, and the geometry the checks below measure against.
+            ctx.track = buildRouteTrack(fullText, route.pointList);
+            ctx.geomPts = ctx.track.geomPts;
+            ctx.geomSource = ctx.track.source;
+
             // Cumulative minutes per fix, and the clock those minutes count from.
+            // Only the planned run, and only rows whose name is a real ident -
+            // a diversion table's time for the same fix must not overwrite the
+            // planned one, and "TOC"/"FIR" are not fixes to look up.
             ctx.wpMin = {};
-            ctx.wp.forEach((w) => { if (w.min !== null) ctx.wpMin[w.name] = w.min; });
+            ctx.track.primary.forEach((w) => {
+                if (w.min !== null && w.kind !== "pseudo") ctx.wpMin[w.name] = w.min;
+            });
             const dof = parseDofMs(fullText), etd = parseEtdMin(fullText);
             ctx.baseMs = (dof !== null && etd !== null) ? dof + etd * 60000 : null;
             return ctx;
+        }
+
+        /* ==============================================================
+         * The flight, FIR by FIR
+         *
+         * A pilot reads a route as a sequence of airspaces, not as a list of
+         * NOTAM numbers. This walks the FIRs in crossing order and hands each
+         * one the items filed under it, with whatever the engine was able to
+         * compute about them.
+         *
+         * It states counts and computed values. It does not conclude that the
+         * flight is cleared - see the absolute rules. The closing line of such
+         * a briefing is "these N were computed, these M you must read", never
+         * "all satisfied, fly safe".
+         * ============================================================== */
+
+        /** FIR boundaries in crossing order, from the waypoint table. */
+        function firCrossings(ctx) {
+            const rows = ctx.track ? ctx.track.primary : [];
+            const out = [];
+            for (const w of rows) {
+                if (!w.fir) continue;
+                // An ADIZ is an identification zone, not an FIR, and the table
+                // prints its crossing in the same column. The EET parser already
+                // skips it for the same reason; without this AAR202 reads as
+                // "... KZAK -> ADIZ -> KZSE ...".
+                if (w.fir === "ADIZ") continue;
+                if (out.length && out[out.length - 1].fir === w.fir) continue;
+                out.push({
+                    fir: w.fir,
+                    at: w.kind === "pseudo" ? null : w.name,
+                    lat: w.lat, lon: w.lon, min: w.min
+                });
+            }
+            return out;
+        }
+
+        /**
+         * The FIRs this flight is inside, in order, with entry times.
+         *
+         * Field 18 EET lists the FIRs *entered* en route - never the one the
+         * flight starts in. So the departure FIR is the one that files NOTAMs
+         * in package 3 but never appears in EET (KZNY for a JFK departure,
+         * RKRR for an Incheon one). It is prepended rather than guessed at
+         * from the airport ident.
+         *
+         * A route that clips back into a FIR shows it once, at first entry.
+         */
+        function firOrder(ctx, items) {
+            const cross = firCrossings(ctx);
+            const eet = ctx.firSeq.map((f) => f.fir);
+            const seen = new Set();
+            const order = [];
+
+            const pkg3 = new Set(items.filter((i) => i.pkg === 3).map((i) => i.station));
+            eet.forEach((f) => pkg3.delete(f));
+            cross.forEach((c) => pkg3.delete(c.fir));
+            // The departure FIR is entered at off-blocks, which is where the
+            // waypoint table's own clock starts.
+            pkg3.forEach((f) => {
+                if (seen.has(f)) return;
+                seen.add(f);
+                order.push({ fir: f, source: "DEP", at: null, enterMs: ctx.baseMs });
+            });
+
+            const push = (fir, at, min, source) => {
+                if (seen.has(fir)) return;
+                seen.add(fir);
+                order.push({
+                    fir, at, source,
+                    enterMs: (min !== null && min !== undefined && ctx.baseMs !== null)
+                        ? ctx.baseMs + min * 60000 : null
+                });
+            };
+            cross.forEach((c) => push(c.fir, c.at, c.min, "WP"));
+            ctx.firSeq.forEach((f) => {
+                if (seen.has(f.fir)) return;
+                const min = /^\d{4}$/.test(f.eet)
+                    ? +f.eet.slice(0, 2) * 60 + +f.eet.slice(2) : null;
+                push(f.fir, null, min, "EET");
+            });
+            return order;
+        }
+
+        /**
+         * Every FIR with the items filed under it and what was computed.
+         * Airport packages ride with the FIR they sit in: departure at the
+         * front, destination and its alternates at the back - the document
+         * says which airport is which, so no geography is guessed.
+         */
+        function buildFirBriefing(ctx, items) {
+            const order = firOrder(ctx, items);
+            if (!order.length) return null;
+
+            const dep = ctx.fpl ? ctx.fpl.dep : null;
+            const dest = ctx.fpl ? ctx.fpl.dest : null;
+            const altns = (ctx.fpl && ctx.fpl.altns) || [];
+
+            const inScope = items.filter((i) => i.pkg === 1 || i.pkg === 3);
+            const byStation = new Map();
+            inScope.forEach((i) => {
+                if (!byStation.has(i.station)) byStation.set(i.station, []);
+                byStation.get(i.station).push(i);
+            });
+
+            const used = new Set();
+            const segs = order.map((o, idx) => {
+                const own = (byStation.get(o.fir) || []);
+                own.forEach((i) => used.add(i));
+
+                // Airports belong to the first and last airspace of the flight.
+                const airports = [];
+                if (idx === 0 && dep) airports.push(dep);
+                if (idx === order.length - 1) {
+                    if (dest) airports.push(dest);
+                    altns.forEach((a) => airports.push(a));
+                }
+                const apItems = [];
+                airports.forEach((a) => (byStation.get(a) || []).forEach((i) => {
+                    apItems.push(i); used.add(i);
+                }));
+
+                const all = own.concat(apItems);
+                return {
+                    fir: o.fir,
+                    enterAt: o.at,
+                    enterMs: o.enterMs || null,
+                    source: o.source,
+                    airports: airports.filter((a) => byStation.has(a)),
+                    items: all,
+                    stats: summariseItems(all)
+                };
+            });
+
+            // Anything filed under a station this walk never reached is still
+            // shown - dropping it would make the briefing look complete when
+            // it is not.
+            const orphans = inScope.filter((i) => !used.has(i));
+            return { segments: segs, orphans, orphanStats: summariseItems(orphans) };
+        }
+
+        /** Counts of what the engine could and could not say about a set. */
+        function summariseItems(list) {
+            const s = {
+                total: list.length, critical: 0, shaded: 0,
+                computed: 0, review: 0, conditionsOk: 0, conditionsCheck: 0,
+                conditionsUnknown: 0
+            };
+            list.forEach((i) => {
+                const x = i.xc || {};
+                if (i.reasonCategory === "CRITICAL") s.critical += 1;
+                if (i.autoShaded) s.shaded += 1;
+                if (x.geo || x.zones || (x.cdr && x.cdr.length) || x.dailyCheck || x.conditions) s.computed += 1;
+                if (x.needsReview) s.review += 1;
+                (x.conditions || []).forEach((c) => {
+                    if (c.verdict === "OK") s.conditionsOk += 1;
+                    else if (c.verdict === "CHECK") s.conditionsCheck += 1;
+                    else if (c.verdict === "UNKNOWN") s.conditionsUnknown += 1;
+                });
+            });
+            return s;
         }
 
         /**
@@ -1612,6 +2341,7 @@
             const fpl = parseIcaoFpl(fullText);
             const notams = parseAllRawNotamsWithShading(fullText);
             const ctx = buildCrossCheckContext(fullText, fpl, "");
+            const items = notams.map((n) => Object.assign({}, n, { xc: crossCheckNotam(n, ctx) }));
             return {
                 fpl,
                 window: ctx.window,
@@ -1625,8 +2355,15 @@
                     navaids: Array.from(ctx.route.navaids)
                 },
                 wpCount: ctx.wp.length,
+                track: {
+                    source: ctx.track.source,
+                    points: ctx.track.points.length,
+                    runs: 1 + ctx.track.others.length,
+                    gaps: ctx.track.gaps
+                },
                 baseMs: ctx.baseMs,
-                items: notams.map((n) => Object.assign({}, n, { xc: crossCheckNotam(n, ctx) }))
+                firBriefing: buildFirBriefing(ctx, items),
+                items: items
             };
         }
 
@@ -1663,7 +2400,8 @@
                 routeTokenCount: ctx.route.fixes.size + ctx.route.airways.size + ctx.route.points.size,
                 firs: Array.from(ctx.firs),
                 firSeq: ctx.firSeq,
-                routePointCount: ctx.route.pointList.length,
+                routePointCount: (ctx.geomPts || ctx.route.pointList).length,
+                geomSource: ctx.geomSource || "FPL15",
                 levels: ctx.levels,
                 total: notams.length,
                 outside,
@@ -1726,6 +2464,9 @@ if (typeof module !== "undefined" && module.exports) {
     module.exports = {
         NOTAM_CATEGORIES,
         categoryGroup,
+        extractSubject,
+        runwayKey,
+        reciprocalEnd,
         parseNotamSections,
         extractPdfLayout,
         extractTextFromPdfFile,
@@ -1757,6 +2498,9 @@ if (typeof module !== "undefined" && module.exports) {
         geoCheck,
         dmToDeg,
         parseOfpWaypoints,
+        splitWaypointRuns,
+        buildRouteTrack,
+        planarLegs,
         parseEtdMin,
         parseDofMs,
         stampMs,
@@ -1774,8 +2518,17 @@ if (typeof module !== "undefined" && module.exports) {
         inAnyWindow,
         hhmm,
         namedAirways,
+        splitClauses,
+        routeSequence,
+        hasLeg,
+        firEntryPoint,
+        checkStatedConditions,
         crossCheckNotam,
         buildCrossCheckContext,
+        firCrossings,
+        firOrder,
+        buildFirBriefing,
+        summariseItems,
         analyseFlight,
         buildCrossCheck,
         parseIcaoFpl,

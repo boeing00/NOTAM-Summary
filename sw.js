@@ -1,9 +1,9 @@
-const CACHE_NAME = 'notam-efb-v8';
+const CACHE_NAME = 'notam-efb-v9';
 const ASSETS = [
   './',
   './index.html',
   './ipad.html',
-  './notam_engine.js?v=3.0',
+  './notam_engine.js?v=3.1',
   './aar223_text.js?v=2.6',
   './aar202_text.js?v=2.6',
   './manifest.json',
