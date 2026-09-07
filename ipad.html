@@ -12,7 +12,7 @@
 <script src="https://cdnjs.cloudflare.com/ajax/libs/pdf.js/3.11.174/pdf.min.js"></script>
 <script src="./aar223_text.js?v=2.6"></script>
 <script src="./aar202_text.js?v=2.6"></script>
-<script src="./notam_engine.js?v=3.2"></script>
+<script src="./notam_engine.js?v=3.3"></script>
 
 <style>
   :root{
@@ -370,7 +370,11 @@ function chips(it) {
     out.push([c.verdict === "INSIDE" ? 'calc' : 'warn', "CDR " + c.awy + " · " + v +
       (c.marginMin != null ? " · 여유 " + c.marginMin + "분" : "")]);
   });
-  if (x.dailyCheck) {
+  // The FIR-entry daily check is the coarse version of the same question -
+  // it uses the moment we cross into the FIR, not the moment we pass the
+  // thing. When the passage line is present it has already answered it, and
+  // two clocks on one NOTAM read as a contradiction.
+  if (x.dailyCheck && !x.passage) {
     const d = x.dailyCheck;
     const hh = (m) => String(Math.floor(m / 60)).padStart(2, "0") + String(m % 60).padStart(2, "0");
     out.push([d.inWindow ? 'warn' : 'calc',
@@ -717,9 +721,45 @@ function firSentence(s) {
 const CV = { OK: ['충족', 'v-ok'], CHECK: ['확인 필요', 'v-check'],
              NA: ['해당 없음', 'v-na'], UNKNOWN: ['판정 불가', 'v-unk'] };
 
+/* Space and time in one sentence: how close we come, when we are there, and
+   whether the NOTAM is live at that moment. The whole-flight window can say
+   "overlaps" while the moment of closest approach falls hours outside it -
+   CZUL H5625/26 comes into force at 1200Z and AAR223 passes it at 0744Z. */
+function passageLine(x) {
+  const p = x.passage;
+  if (!p) return null;
+  const at = utc(p.tMs);
+  const near = Math.round(p.nm) + 'NM';
+  const where = p.between.filter(Boolean).join('~');
+  const head = '최근접 ' + near + (where ? ' (' + where + ' 사이)' : '') + ' · 통과 예정 ' + at;
+
+  // How much room there is matters as much as which side of the line we are
+  // on. KZAK A4226/26 comes into force 22 minutes after AAR203 passes it - a
+  // modest delay puts the flight inside it.
+  if (p.reason === 'BEFORE_START') {
+    const gap = p.startsMs ? mins((p.startsMs - p.tMs) / 60000) : null;
+    return ['calc', head + ' · 이 시각에는 아직 발효 전입니다 (발효 ' + utc(p.startsMs) +
+      (gap ? ', ' + gap + ' 전에 통과' : '') + ')'];
+  }
+  if (p.reason === 'AFTER_END') {
+    const gap = p.endsMs ? mins((p.tMs - p.endsMs) / 60000) : null;
+    return ['calc', head + ' · 이 시각에는 이미 종료되었습니다 (종료 ' +
+      (p.endsMs ? utc(p.endsMs) : '—') + (gap ? ', ' + gap + ' 후에 통과' : '') + ')'];
+  }
+  if (p.reason === 'IN_FORCE' && p.dailyAt === false) {
+    return ['calc', head + ' · 유효기간에는 들지만 일일 운영시간 밖입니다'];
+  }
+  if (p.reason === 'IN_FORCE') {
+    return ['warn', head + ' · 이 시각에 발효 중입니다'];
+  }
+  return ['plain', head + ' · 유효기간을 읽지 못해 그 시각 발효 여부는 판정하지 않았습니다'];
+}
+
 function impactBlock(it) {
   const x = it.xc;
   const rows = [];
+  const pl = passageLine(x);
+  if (pl) rows.push([pl[0], esc(pl[1])]);
 
   (x.cdr || []).forEach((c) => rows.push(['calc', esc(cdrDetail(c))]));
   if (x.dailyCheck) {
@@ -729,11 +769,15 @@ function impactBlock(it) {
       '일일 운영시간 ' + d.spec + ' · 이 공역 진입 예정 ' + hh(d.entry) + 'Z · ' +
       (d.inWindow ? '운영 시간대 안' : '운영 시간대 밖'))]);
   }
-  if (x.geo) {
+  if (x.geo && !x.passage) {
     rows.push(['calc', esc((x.geo.lateralClear ? '항로에서 ' : '항로가 도형에 저촉 ') +
       Math.round(x.geo.minNm) + 'NM' + (x.geo.radius ? ' (고시 반경 ' + x.geo.radius + 'NM)' : '') +
       (x.geo.vertClear === true ? ' · 계획 고도가 고시 고도대와 분리됨'
         : x.geo.vertClear === false ? ' · 계획 고도가 고시 고도대와 겹침' : ''))]);
+  }
+  if (x.geo && x.passage && x.geo.vertClear !== null && x.geo.vertClear !== undefined) {
+    rows.push(['calc', esc(x.geo.vertClear ? '계획 고도가 고시 고도대와 분리됨'
+                                           : '계획 고도가 고시 고도대와 겹침')]);
   }
   ((x.zones && x.zones.banned) || []).forEach((z) => rows.push([z.entered ? 'warn' : 'calc',
     esc(z.entered ? '금지 공역을 항로가 관통함' : '금지 공역에서 ' + Math.round(z.nearestNm) + 'NM')]));

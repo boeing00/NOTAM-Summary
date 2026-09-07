@@ -950,6 +950,64 @@
             return Math.abs(xt) * NM_PER_RAD;
         }
 
+        /**
+         * Same distance segNm() gives, plus how far along the leg the closest
+         * point sits (0 at A, 1 at B). The fraction is what lets a time be put
+         * on the approach.
+         *
+         * segNm() is left exactly as it is. Its unsigned along-track bug is
+         * documented in CLAUDE.md as fixed and not to be reintroduced; the
+         * sign handling here is the same, written beside it rather than
+         * threaded through it.
+         */
+        function segNearest(A, B, P) {
+            const len = gcNm(A, B) / NM_PER_RAD;
+            if (len === 0) return { nm: gcNm(A, P), frac: 0 };
+            const d13 = gcNm(A, P) / NM_PER_RAD;
+            const delta = bearing(A, P) - bearing(A, B);
+            const xt = Math.asin(Math.sin(d13) * Math.sin(delta));
+            let along = Math.acos(Math.max(-1, Math.min(1, Math.cos(d13) / Math.cos(xt))));
+            if (Math.cos(delta) < 0) along = -along;
+            if (along < 0) return { nm: gcNm(A, P), frac: 0 };
+            if (along > len) return { nm: gcNm(B, P), frac: 1 };
+            return { nm: Math.abs(xt) * NM_PER_RAD, frac: along / len };
+        }
+
+        /**
+         * Where and *when* the flight comes closest to a point.
+         *
+         * Every waypoint on the planned track carries cumulative minutes, so
+         * the leg the closest approach falls on has a time at each end and the
+         * moment itself is a linear interpolation between them. This is what
+         * turns "184NM from the box" into "184NM from the box, at 1943Z".
+         */
+        function trackNearest(pts, P, baseMs) {
+            if (!pts || pts.length < 2) return null;
+            let best = null;
+            for (let i = 0; i < pts.length - 1; i += 1) {
+                const r = segNearest(pts[i], pts[i + 1], P);
+                if (!best || r.nm < best.nm) best = { nm: r.nm, frac: r.frac, i };
+            }
+            if (!best) return null;
+
+            const a = pts[best.i], b = pts[best.i + 1];
+            let min = null;
+            if (typeof a.min === "number" && typeof b.min === "number") {
+                min = a.min + (b.min - a.min) * best.frac;
+            } else if (typeof a.min === "number") {
+                min = a.min;
+            } else if (typeof b.min === "number") {
+                min = b.min;
+            }
+            return {
+                nm: best.nm,
+                between: [a.name || null, b.name || null],
+                min,
+                tMs: (min !== null && baseMs !== null && baseMs !== undefined)
+                    ? baseMs + min * 60000 : null
+            };
+        }
+
         /** Closest approach of a polyline to a point. */
         function polylineNm(pts, P) {
             if (!pts.length) return null;
@@ -2000,6 +2058,7 @@
 
             // --- TIME -------------------------------------------------------
             let timeState = "UNKNOWN";
+            let validFrom = null, validTo = null, validPerm = false;
             if (ctx.window) {
                 const parts = String(item.valid || "").split("~");
                 const from = parseNotamStamp(parts[0]);
@@ -2011,6 +2070,7 @@
                     const endsBefore = !perm && to && to < ctx.window.start;
                     timeState = (startsAfter || endsBefore) ? "OUTSIDE" : "OVERLAP";
                 }
+                validFrom = from; validTo = to; validPerm = perm;
             }
 
             // --- STATION ----------------------------------------------------
@@ -2123,6 +2183,68 @@
             const dupZone = !!(zones && area && area.points &&
                 zones.banned.some((z) => samePts(z.points, area.points)));
             if (dupZone) geo = null;
+            /* ---- SPACE x TIME -------------------------------------------
+             * Until now the two were asked separately: does the validity
+             * overlap the whole flight (hours wide), and does the route pass
+             * near the shape (no clock at all). A NOTAM can pass both and still
+             * be irrelevant - live in the morning, flown past at night.
+             *
+             * The planned track carries a time at every waypoint, so the
+             * closest approach has a moment. Asking the validity at *that*
+             * moment is arithmetic, which is the one thing this file may
+             * assert. Where the track or the clock is missing, it says so
+             * rather than guessing.
+             * ------------------------------------------------------------ */
+            let passage = null;
+            const trackPts = (ctx.track && ctx.track.points) || [];
+            if (trackPts.length >= 2 && ctx.baseMs !== null) {
+                const targets = [];
+                if (area) {
+                    if (area.kind === "circle" && area.centre) targets.push(area.centre);
+                    else (area.points || []).forEach((pt) => targets.push(pt));
+                }
+                if (zones) {
+                    (zones.banned || []).forEach((z) => (z.points || []).forEach((pt) => targets.push(pt)));
+                    (zones.gates || []).forEach((g) => { if (g.a) targets.push(g.a); if (g.b) targets.push(g.b); });
+                }
+                let best = null;
+                targets.forEach((pt) => {
+                    const n = trackNearest(trackPts, pt, ctx.baseMs);
+                    if (n && (!best || n.nm < best.nm)) best = n;
+                });
+                if (best && best.tMs !== null) {
+                    const t = best.tMs;
+                    const liveAt = validFrom
+                        ? (t >= validFrom && (validPerm || !validTo || t <= validTo))
+                        : null;
+                    let dailyAt = null;
+                    if (daily) dailyAt = inAnyWindow(Math.floor(t / 60000) % 1440, daily.windows);
+                    // Not in force and already finished are different facts,
+                    // and a crew reads them differently: one moves with a
+                    // delay, the other never will.
+                    let reason = "UNKNOWN";
+                    if (liveAt === true) reason = "IN_FORCE";
+                    else if (liveAt === false) {
+                        reason = (validFrom && t < validFrom) ? "BEFORE_START" : "AFTER_END";
+                    }
+                    passage = {
+                        nm: best.nm,
+                        between: best.between,
+                        tMs: t,
+                        utcMin: Math.floor(t / 60000) % 1440,
+                        liveAt,
+                        dailyAt,
+                        reason,
+                        startsMs: validFrom || null,
+                        endsMs: validPerm ? null : (validTo || null),
+                        // Only when both are known and both say yes does this
+                        // become a statement; otherwise it stays a report.
+                        active: (liveAt === null) ? null
+                              : (dailyAt === null ? liveAt : (liveAt && dailyAt))
+                    };
+                }
+            }
+
             const inWindow = timeState !== "OUTSIDE";
             // En route = the airspace we fly through, or a NOTAM that names a
             // point we filed. Airport NOTAMs are the other bucket.
@@ -2167,6 +2289,7 @@
                 zones,
                 cdr,
                 conditions,
+                passage,
                 geo,
                 firContext,
                 namedOurs: fixes.mine,
@@ -2592,6 +2715,8 @@ if (typeof module !== "undefined" && module.exports) {
         gcNm,
         bearing,
         segNm,
+        segNearest,
+        trackNearest,
         polylineNm,
         shiftLon,
         pointInPolygon,
