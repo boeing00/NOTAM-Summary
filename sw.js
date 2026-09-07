@@ -1,4 +1,4 @@
-const CACHE_NAME = 'notam-efb-v9';
+const CACHE_NAME = 'notam-efb-v10';
 const ASSETS = [
   './',
   './index.html',
@@ -37,6 +37,8 @@ self.addEventListener('activate', (e) => {
 // staring at a blank page when the cache already holds a usable copy.
 const NETWORK_TIMEOUT_MS = 3000;
 
+const sameOrigin = (req) => new URL(req.url).origin === self.location.origin;
+
 self.addEventListener('fetch', (e) => {
   if (e.request.method !== 'GET') return;
   if (new URL(e.request.url).protocol.startsWith('chrome-extension')) return;
@@ -47,7 +49,15 @@ self.addEventListener('fetch', (e) => {
     try {
       const networkRes = await new Promise((resolve, reject) => {
         const timer = setTimeout(() => reject(new Error('timeout')), NETWORK_TIMEOUT_MS);
-        fetch(e.request).then(
+        // Network-first only means network-first if the fetch actually goes to
+        // the network. GitHub Pages serves HTML with Cache-Control: max-age=600,
+        // and a plain fetch() is served out of the browser's HTTP cache for
+        // those ten minutes - so a reload after a deploy kept showing the old
+        // page even with no service worker involved. Same-origin requests
+        // therefore bypass the HTTP cache; the CDN files are left alone, since
+        // they are version-pinned and re-downloading them on cabin wifi costs
+        // more than it saves.
+        fetch(sameOrigin(e.request) ? new Request(e.request, { cache: 'reload' }) : e.request).then(
           (r) => { clearTimeout(timer); resolve(r); },
           (err) => { clearTimeout(timer); reject(err); }
         );
