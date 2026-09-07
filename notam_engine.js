@@ -2460,7 +2460,12 @@
                     source: ctx.track.source,
                     points: ctx.track.points.length,
                     runs: 1 + ctx.track.others.length,
-                    gaps: ctx.track.gaps
+                    gaps: ctx.track.gaps,
+                    // The flown polyline itself, for anyone drawing it.
+                    pts: ctx.track.points.map((w) => ({
+                        name: w.kind === "pseudo" ? null : w.name,
+                        lat: w.lat, lon: w.lon, min: w.min, fir: w.fir || null
+                    }))
                 },
                 baseMs: ctx.baseMs,
                 firBriefing: buildFirBriefing(ctx, items),
