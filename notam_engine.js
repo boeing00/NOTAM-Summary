@@ -228,7 +228,51 @@
         /**
          * Generates a concise, plain-language Korean translation and operational explanation for ANY NOTAM.
          */
+        /**
+         * Many rules below recognise a NOTAM by its wording alone and then name
+         * an airport in the answer - "RWY 15L/33R CLSD" is answered with
+         * "인천공항(RKSI) ...". Runway numbers are not unique between airports,
+         * so a Boston closure came back described as Incheon. Inventing a place
+         * is the first thing the absolute rules forbid.
+         *
+         * Rather than trust twenty hand-written branches, the answer is checked
+         * against the station that actually issued the NOTAM: if it names a
+         * different ICAO, the rule matched the wrong airport and the generic
+         * line is used instead.
+         */
+        // Airports the rules below name in Korean. A first pass guarded only on
+        // "(ICAO)" in parentheses and still let "뉴욕 JFK 공항" describe a
+        // Chicago NOTAM, because that phrase carries no ICAO at all. The name
+        // has to be checked too.
+        const KO_AIRPORT_HINTS = [
+            [/인천공항|\(RKSI\)/, "RKSI"],
+            [/김포공항|\(RKSS\)/, "RKSS"],
+            [/뉴욕\s*JFK|뉴욕\s*CRI|\(KJFK\)/, "KJFK"],
+            [/로스앤젤레스|\(KLAX\)/, "KLAX"],
+            [/온타리오|\(KONT\)/, "KONT"],
+            [/몬트리올|\(CYUL\)/, "CYUL"],
+            [/하네다|\(RJTT\)/, "RJTT"],
+            [/간사이|\(RJBB\)/, "RJBB"]
+        ];
+
         function generateKoreanExplanation(raw, station) {
+            const text = koreanExplanationFor(raw, station);
+            if (!station) return text;
+
+            const named = String(text).match(/\(([A-Z]{4})\)/);
+            let claimed = named ? named[1] : null;
+            if (!claimed) {
+                for (const [re, icao] of KO_AIRPORT_HINTS) {
+                    if (re.test(text)) { claimed = icao; break; }
+                }
+            }
+            if (claimed && claimed !== station) {
+                return `${station} 시설 및 절차 운항 참고 고시 (원문 세부 사항 참조).`;
+            }
+            return text;
+        }
+
+        function koreanExplanationFor(raw, station) {
             const u = raw.toUpperCase();
 
             // 1. Company Advisories (COAD)
@@ -330,7 +374,12 @@
 
             // 7. Volcanic Ash, Airspace & Enroute Restrictions
             if (u.includes("VOLCANIC") || u.includes("KLYUCHEVSKOY")) {
-                return "러시아 캄차카 반도 화산재 분출 경보 (ORANGE 등급, SFC~FL250 화산재 구름 회피 필수).";
+                // The altitude band this used to state (SFC~FL250) is not in
+                // the NOTAM - A2278/26 gives a colour code and a warning, no
+                // levels at all. A number the pilot could plan against, that
+                // the document never printed, is the worst thing this file can
+                // produce. Say what the advisory says and no more.
+                return "러시아 캄차카 반도 화산 활동 주의보 (항공 색상 코드 ORANGE). 분출·증기·화산재 목격 시 ATC 보고.";
             }
             if (u.includes("USER PREFERRED ROUTE")) {
                 return "앵커리지 FIR 사용자 선호 항로(UPR) 비행계획 수립 지침 (지정 픽스 경유 및 합류 규정 준수).";
@@ -825,6 +874,11 @@
 
         /** Decodes the coordinate forms these packages actually use. */
         function decodeLatLon(tok) {
+            // Some NOTAMs put a space between latitude and longitude -
+            // "SHEVELUCH VOLCANO / 563800N 1611900E /". It is one coordinate
+            // either way, so the space is removed before matching rather than
+            // duplicated into every pattern below.
+            tok = String(tok == null ? "" : tok).replace(/\s+/g, "");
             let m;
             // 084325N1674307E - degrees, minutes, seconds
             m = tok.match(/^(\d{2})(\d{2})(\d{2})([NS])(\d{3})(\d{2})(\d{2})([EW])$/);
@@ -956,7 +1010,7 @@
          */
         function extractProhibitedAreas(raw) {
             const up = String(raw || "").toUpperCase();
-            const COORD = "(?:\\d{6}[NS]\\d{7}[EW]|\\d{4}[NS]\\d{5}[EW])";
+            const COORD = "(?:\\d{6}[NS]\\s?\\d{7}[EW]|\\d{4}[NS]\\s?\\d{5}[EW])";
             const cue = /(?:MUST NOT|SHALL NOT|DO NOT)\s+(?:FLT|FLIGHT)?\s*PLAN(?:NED)?(?:\s+THROUGH)?/g;
             const out = [];
             let m;
@@ -986,7 +1040,7 @@
          */
         function extractGateSegments(raw) {
             const up = String(raw || "").toUpperCase();
-            const COORD = "(\\d{6}[NS]\\d{7}[EW]|\\d{4}[NS]\\d{5}[EW])";
+            const COORD = "(\\d{6}[NS]\\s?\\d{7}[EW]|\\d{4}[NS]\\s?\\d{5}[EW])";
             const re = new RegExp("\\bB(?:TN|ETWEEN)\\s+" + COORD + "\\s+AND\\s+" + COORD + "\\b", "g");
             const out = [];
             let m;
@@ -1079,7 +1133,7 @@
          */
         function extractGeoArea(raw) {
             const up = String(raw || "").toUpperCase();
-            const coordRe = /\b(\d{6}[NS]\d{7}[EW]|\d{4}[NS]\d{5}[EW])\b/g;
+            const coordRe = /\b(\d{6}[NS]\s?\d{7}[EW]|\d{4}[NS]\s?\d{5}[EW])\b/g;
 
             const rad = up.match(/(\d+(?:\.\d+)?)\s*NM\s+RADIUS/);
             if (rad) {
@@ -2185,6 +2239,44 @@
          * "all satisfied, fly safe".
          * ============================================================== */
 
+        /**
+         * FIR names. Published, fixed facts - RJJJ is Fukuoka - not something
+         * derived from the document, and not something to guess: a code that
+         * is not in this table is printed as the code. A briefing that says
+         * "앵커리지" instead of "PAZA" is the difference between a report and
+         * a table, but a wrong name is worse than a bare code.
+         */
+        const FIR_NAMES = {
+            RKRR: ["인천", "INCHEON"],
+            RJJJ: ["후쿠오카", "FUKUOKA"],
+            PAZA: ["앵커리지", "ANCHORAGE"],
+            PAZN: ["앵커리지 대양", "ANCHORAGE OCEANIC"],
+            CZEG: ["에드먼턴", "EDMONTON"],
+            CZWG: ["위니펙", "WINNIPEG"],
+            CZYZ: ["토론토", "TORONTO"],
+            CZUL: ["몬트리올", "MONTREAL"],
+            CZVR: ["밴쿠버", "VANCOUVER"],
+            CZQX: ["갠더", "GANDER"],
+            KZNY: ["뉴욕", "NEW YORK"],
+            KZBW: ["보스턴", "BOSTON"],
+            KZAK: ["오클랜드 대양", "OAKLAND OCEANIC"],
+            KZOA: ["오클랜드", "OAKLAND"],
+            KZSE: ["시애틀", "SEATTLE"],
+            KZLA: ["로스앤젤레스", "LOS ANGELES"],
+            KZDV: ["덴버", "DENVER"],
+            KZMP: ["미니애폴리스", "MINNEAPOLIS"],
+            RKSI: ["인천", "INCHEON"],
+            RJTG: ["도쿄", "TOKYO"],
+            ZKKP: ["평양", "PYONGYANG"],
+            UHHH: ["하바롭스크", "KHABAROVSK"],
+            UHMM: ["마가단", "MAGADAN"]
+        };
+
+        function firName(code) {
+            const n = FIR_NAMES[code];
+            return n ? { ko: n[0], en: n[1] } : null;
+        }
+
         /** FIR boundaries in crossing order, from the waypoint table. */
         function firCrossings(ctx) {
             const rows = ctx.track ? ctx.track.primary : [];
@@ -2292,8 +2384,17 @@
                 }));
 
                 const all = own.concat(apItems);
+                // Where this airspace sits in the flight - the only thing the
+                // briefing says about a FIR that is not a count or a NOTAM.
+                const phase = order.length === 1 ? "전 구간"
+                    : idx === 0 ? "이륙 · 초기 상승"
+                    : idx === order.length - 1 ? "강하 · 착륙"
+                    : "순항";
+
                 return {
                     fir: o.fir,
+                    name: firName(o.fir),
+                    phase,
                     enterAt: o.at,
                     enterMs: o.enterMs || null,
                     source: o.source,
@@ -2525,6 +2626,8 @@ if (typeof module !== "undefined" && module.exports) {
         checkStatedConditions,
         crossCheckNotam,
         buildCrossCheckContext,
+        FIR_NAMES,
+        firName,
         firCrossings,
         firOrder,
         buildFirBriefing,
