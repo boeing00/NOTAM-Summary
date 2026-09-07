@@ -999,10 +999,21 @@
             } else if (typeof b.min === "number") {
                 min = b.min;
             }
+            // Where on the leg the closest point falls. Linear in lat/lon,
+            // which is fine for drawing - the distance itself was computed on
+            // the sphere by segNearest above.
+            let dl = b.lon - a.lon;
+            while (dl > 180) dl -= 360;
+            while (dl < -180) dl += 360;
+
             return {
                 nm: best.nm,
                 between: [a.name || null, b.name || null],
                 min,
+                at: {
+                    lat: a.lat + (b.lat - a.lat) * best.frac,
+                    lon: a.lon + dl * best.frac
+                },
                 tMs: (min !== null && baseMs !== null && baseMs !== undefined)
                     ? baseMs + min * 60000 : null
             };
@@ -2207,10 +2218,12 @@
                     (zones.banned || []).forEach((z) => (z.points || []).forEach((pt) => targets.push(pt)));
                     (zones.gates || []).forEach((g) => { if (g.a) targets.push(g.a); if (g.b) targets.push(g.b); });
                 }
-                let best = null;
+                // Which coordinate produced the winning distance is worth
+                // keeping: a per-NOTAM map draws the leader line to it.
+                let best = null, bestTarget = null;
                 targets.forEach((pt) => {
                     const n = trackNearest(trackPts, pt, ctx.baseMs);
-                    if (n && (!best || n.nm < best.nm)) best = n;
+                    if (n && (!best || n.nm < best.nm)) { best = n; bestTarget = pt; }
                 });
                 if (best && best.tMs !== null) {
                     const t = best.tMs;
@@ -2230,6 +2243,8 @@
                     passage = {
                         nm: best.nm,
                         between: best.between,
+                        at: best.at,
+                        target: bestTarget,
                         tMs: t,
                         utcMin: Math.floor(t / 60000) % 1440,
                         liveAt,
