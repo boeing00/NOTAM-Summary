@@ -370,11 +370,7 @@ function chips(it) {
     out.push([c.verdict === "INSIDE" ? 'calc' : 'warn', "CDR " + c.awy + " · " + v +
       (c.marginMin != null ? " · 여유 " + c.marginMin + "분" : "")]);
   });
-  // The FIR-entry daily check is the coarse version of the same question -
-  // it uses the moment we cross into the FIR, not the moment we pass the
-  // thing. When the passage line is present it has already answered it, and
-  // two clocks on one NOTAM read as a contradiction.
-  if (x.dailyCheck && !x.passage) {
+  if (x.dailyCheck) {
     const d = x.dailyCheck;
     const hh = (m) => String(Math.floor(m / 60)).padStart(2, "0") + String(m % 60).padStart(2, "0");
     out.push([d.inWindow ? 'warn' : 'calc',
@@ -762,7 +758,11 @@ function impactBlock(it) {
   if (pl) rows.push([pl[0], esc(pl[1])]);
 
   (x.cdr || []).forEach((c) => rows.push(['calc', esc(cdrDetail(c))]));
-  if (x.dailyCheck) {
+  // The FIR-entry daily check is the coarse form of the same question - it uses
+  // the moment we cross into the FIR, not the moment we pass the thing itself.
+  // When passageLine() has answered it, two clocks on one NOTAM read as a
+  // contradiction (CZUL H5625/26 showed 0640Z and 0744Z side by side).
+  if (x.dailyCheck && !x.passage) {
     const d = x.dailyCheck;
     const hh = (m) => String(Math.floor(m / 60)).padStart(2, '0') + String(m % 60).padStart(2, '0');
     rows.push([d.inWindow ? 'warn' : 'calc', esc(
