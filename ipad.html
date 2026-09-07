@@ -12,6 +12,7 @@
 <script src="https://cdnjs.cloudflare.com/ajax/libs/pdf.js/3.11.174/pdf.min.js"></script>
 <script src="./aar223_text.js?v=2.6"></script>
 <script src="./aar202_text.js?v=2.6"></script>
+<script src="./coastline.js?v=2"></script>
 <script src="./notam_engine.js?v=3.4"></script>
 
 <style>
@@ -155,6 +156,7 @@
                   background:var(--panel2);font-size:14.5px;font-weight:700;color:#cfe4ff}
   .rmap{display:block;width:100%;height:auto;background:#070c14;
         border:1px solid #1a2739;border-radius:8px}
+  .rmap .land{fill:none;stroke:#33506e;stroke-width:1.3;stroke-linejoin:round}
   .rmap .gl{stroke:#1b2a3f;stroke-width:1}
   .rmap .gt{fill:#4a5a72;font:10px ui-monospace,Menlo,monospace}
   .rmap .rt{fill:none;stroke:#5aa9ff;stroke-width:2.2;stroke-linejoin:round}
@@ -855,6 +857,41 @@ function itemShapes(it) {
 const hasMap = (it) => itemShapes(it).length > 0 &&
   ((DATA.track && DATA.track.pts) || []).length >= 2;
 
+/* Land, clipped to the window the map is showing.
+ *
+ * Coastline longitudes are plain [-180,180]; the map's are unwrapped along the
+ * track. Each vertex is shifted by whichever multiple of 360 lands it in the
+ * window - O(1), and correct across the antimeridian. A ring that genuinely
+ * spans the dateline then has neighbours 360 apart, so the path is broken
+ * wherever consecutive points jump more than 180 rather than drawing a line
+ * straight across the map.
+ */
+function coastPaths(x0, x1, y0, y1, sx, sy) {
+  if (typeof COASTLINE === 'undefined') return '';
+  const cx = (x0 + x1) / 2;
+  // Margin in proportion to the window, not a fixed number of degrees: these
+  // maps frame anything from 3 to 80 degrees.
+  const mx = (x1 - x0) * 0.35, my = (y1 - y0) * 0.35;
+  const out = [];
+  for (const ring of COASTLINE) {
+    let d = '', prevX = null, started = false, drew = false;
+    for (let i = 0; i < ring.length; i += 2) {
+      const lat = ring[i + 1];
+      const X = ring[i] + 360 * Math.round((cx - ring[i]) / 360);
+      if (prevX !== null && Math.abs(X - prevX) > 180) { started = false; }
+      prevX = X;
+      // Keep a margin so shapes crossing the edge still close visibly.
+      const inX = X > x0 - mx && X < x1 + mx;
+      const inY = lat > y0 - my && lat < y1 + my;
+      if (!inX || !inY) { started = false; continue; }
+      d += (started ? 'L' : 'M') + sx(X).toFixed(1) + ' ' + sy(lat).toFixed(1) + ' ';
+      started = true; drew = true;
+    }
+    if (drew) out.push('<path d="' + d.trim() + '" class="land"/>');
+  }
+  return out.join('');
+}
+
 /* Where this one NOTAM sits relative to the route.
  *
  * Framed on the shape and the point of closest approach, so the gap being
@@ -953,7 +990,8 @@ function itemMapSvg(id) {
     : '이 고시의 좌표와 항로';
 
   return '<svg viewBox="0 0 ' + W + ' ' + H + '" preserveAspectRatio="xMidYMid meet" class="rmap">' +
-      grid.join('') + '<path d="' + line + '" class="rt"/>' + drawn + leader + wps +
+      coastPaths(x0, x1, y0, y1, sx, sy) + grid.join('') +
+      '<path d="' + line + '" class="rt"/>' + drawn + leader + wps +
     '</svg>' +
     '<p class="mnote">' + cap + ' · 등거리 원통도법 개요도이며 <b>항법용이 아닙니다</b>.</p>';
 }
