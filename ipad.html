@@ -109,6 +109,34 @@
   .chip.calc{background:var(--calc-bg);color:#8ef0bd;border-color:#1d5c40}
   .chip.warn{background:var(--rev-bg);color:#ffd490;border-color:#6b4a12}
   .body{padding:0 14px 14px 32px;border-top:1px solid var(--line);margin-top:2px}
+  /* ---- 요약 보고서 ---------------------------------------------------- */
+  .report{margin-top:18px;max-width:820px}
+  .rintro{margin:0 0 16px;font-size:15px;line-height:1.75;color:var(--ink)}
+  .rtitle{margin:0 0 20px;padding-bottom:10px;border-bottom:2px solid #22406a;
+          font-size:19px;font-weight:800;color:#e2edfa;letter-spacing:.2px}
+  .rsec{margin:0 0 26px}
+  .rsec h3{margin:0 0 5px;font-size:17px;font-weight:800;color:#dcebfb;
+           display:flex;align-items:baseline;gap:8px;flex-wrap:wrap}
+  .rsec h3 .no{color:#5aa9ff}
+  .rsec h3 .rcode{font:600 12px/1 ui-monospace,Menlo,monospace;color:var(--ink3)}
+  .rlead{margin:0 0 12px;color:var(--ink2);font-size:13.5px;line-height:1.7}
+  .ri{margin:0 0 13px;padding-left:14px;border-left:2px solid #24405f}
+  .ri.crit{border-left-color:var(--crit)}
+  .rt{font-size:14.5px;font-weight:700;color:#cfe4ff;line-height:1.5}
+  .rt .rid{font:600 11.5px/1 ui-monospace,Menlo,monospace;color:var(--ink3);font-weight:500}
+  .rt .rc{font-size:10.5px;font-weight:700;padding:2px 6px;border-radius:5px;
+          background:var(--crit-bg);color:#ffb0b0;vertical-align:1px}
+  .rr{display:grid;grid-template-columns:64px 1fr;gap:9px;margin-top:5px;
+      font-size:13.5px;line-height:1.65;color:var(--ink2);align-items:baseline}
+  .rr>span{font-size:11.5px;font-weight:700;color:var(--ink3)}
+  .rr.im{color:#8ef0bd}
+  .rnone{padding-left:14px;border-left:2px solid #1c2a3d;color:var(--ink3);
+         font-size:13px;line-height:1.6}
+  .rfoot{margin-top:26px;padding:14px 16px;border-radius:12px;
+         border:1px solid #2a3a52;background:#0d1522}
+  .rfoot b{display:block;margin-bottom:5px;font-size:13px;color:#cfe4ff}
+  .rfoot p{margin:0;color:var(--ink2);font-size:13px;line-height:1.7}
+
   /* ---- FIR summary --------------------------------------------------- */
   .fir summary{background:#122036}
   .firbody{padding:6px 14px 14px}
@@ -227,6 +255,7 @@
     <div class="flt" id="flt"></div>
     <div class="segs" id="segs"></div>
   </div>
+  <div id="report" hidden></div>
   <div id="raw" hidden></div>
 
   <div class="intake" id="intake">
@@ -548,6 +577,108 @@ function knownWithoutGeometry(it) {
   return bits.join(' · ') + ' — 그 밖의 영향은 원문을 확인하십시오';
 }
 
+/* ==================================================================
+ * 요약 뷰 - the briefing on its own page.
+ *
+ * Same facts as the FIR block in the list, laid out as a report: numbered
+ * airspaces, a sentence about each, then the items as 내용 / 운항 영향.
+ * Nothing here is asserted that was not computed, and there is no closing
+ * "all clear" line - see the absolute rules in CLAUDE.md.
+ * ================================================================== */
+
+/* A short heading for one NOTAM. The Korean explanation is a sentence; its
+   first clause reads as a title. Nothing is invented - when the explanation is
+   the generic fallback, the category name is used instead. */
+function itemTitle(it) {
+  const ko = String(it.koreanExplanation || '');
+  const generic = /원문 세부 사항 참조|원문을 확인/.test(ko) || ko.length < 12;
+  if (!generic) {
+    const cut = ko.search(/[(.]/);
+    const head = (cut > 8 ? ko.slice(0, cut) : ko).trim().replace(/[.,]$/, '');
+    if (head.length >= 6) return head;
+  }
+  // No Korean summary for this type. The document's own opening clause makes a
+  // better heading than the bare category name ("공역") - and quoting is not
+  // inventing. It repeats the first words of 내용 below, which is a fair price
+  // for a line a pilot can scan.
+  // Cut at a colon, a dash, or the start of a numbered list - those open the
+  // body. Not at any full stop: "MULTIPLE U.S. MIL ACT" becomes "MULTIPLE U.S".
+  let head = firstLine(it).split(/\s*:\s|\s-\s|\s\d+\.\s/)[0].trim();
+  if (head.length > 58) head = head.slice(0, 58).replace(/\s+\S*$/, '') + '…';
+  if (head.length >= 8) return head;
+  return [it.categoryKo, it.subjectLabel].filter(Boolean).join(' · ') || it.station + ' 고시';
+}
+
+/* What this airspace holds, counted. The phase comes from position in the
+   route; the rest is a tally of the document's own subject headings. */
+function firSentence(s) {
+  const cats = {};
+  s.items.forEach((i) => { const k = i.categoryKo; if (k) cats[k] = (cats[k] || 0) + 1; });
+  const top = Object.entries(cats).sort((a, b) => b[1] - a[1]).slice(0, 3)
+    .map(([k, v]) => k + ' ' + v + '건').join(', ');
+  const head = s.phase === '이륙 · 초기 상승' ? '이륙 및 초기 상승 단계가 포함된 공역입니다'
+             : s.phase === '강하 · 착륙' ? '강하 및 착륙 단계가 포함된 공역입니다'
+             : '순항 구간입니다';
+  return head + (top ? '. ' + top + '이 고시되어 있습니다' : '') + '.';
+}
+
+function summaryReport() {
+  const b = DATA.firBriefing;
+  if (!b || !b.segments.length) return '<div class="empty">요약할 자료가 없습니다.</div>';
+  const f = DATA.fpl;
+  const route = b.segments.map((s) => (s.name ? s.name.ko + ' FIR' : s.fir)).join(' → ');
+  const depName = (f && firName2(f.dep)) || (f && f.dep) || '';
+  const title = (f ? (f.callsign ? f.callsign + ' ' : '') + f.dep + '-' + f.dest : '운항편');
+
+  const tot = b.segments.reduce((a, s) => {
+    ['total', 'critical', 'computed'].forEach((k) => { a[k] = (a[k] || 0) + s.stats[k]; });
+    return a;
+  }, {});
+
+  const secs = b.segments.map((s, idx) => {
+    const notable = s.items.filter((i) => i.reasonCategory === 'CRITICAL' || evidenceLine(i));
+    const body = notable.length
+      ? notable.map((i) => {
+          const pg = pageOf(i);
+          const ev = evidenceLine(i);
+          const ko = String(i.koreanExplanation || '');
+          const generic = /원문 세부 사항 참조|원문을 확인/.test(ko) || ko.length < 12;
+          return '<div class="ri' + (i.reasonCategory === 'CRITICAL' ? ' crit' : '') + '">' +
+            '<div class="rt">' + esc(itemTitle(i)) +
+              ' <span class="rid">(' + esc(i.id) + (pg ? ', Page ' + pg : '') + ')</span>' +
+              (i.reasonCategory === 'CRITICAL' ? ' <span class="rc">운항 직결 필수</span>' : '') +
+            '</div>' +
+            '<div class="rr"><span>내용</span>' + esc(generic ? firstLine(i).slice(0, 190) : ko) + '</div>' +
+            '<div class="rr im"><span>운항 영향</span>' +
+              esc(ev || knownWithoutGeometry(i)) + '</div>' +
+          '</div>';
+        }).join('')
+      : '<div class="rnone">기계가 근거를 낸 항목은 없습니다. ' + s.stats.total +
+        '건 전부 목록 화면에서 원문으로 확인하십시오.</div>';
+
+    return '<section class="rsec"><h3><span class="no">' + (idx + 1) + '.</span> ' +
+      esc((s.name ? s.name.ko : s.fir) + ' 비행정보구역') +
+      ' <span class="rcode">(' + esc(s.fir) + (s.name ? ' / ' + esc(s.name.en) + ' FIR' : '') + ')</span></h3>' +
+      '<p class="rlead">' + esc(firSentence(s)) +
+        (s.enterMs !== null ? ' 진입 예정 ' + utc(s.enterMs) : '') +
+        (s.enterAt ? ' (' + esc(s.enterAt) + ')' : '') + '</p>' +
+      body + '</section>';
+  }).join('');
+
+  return '<div class="report">' +
+    '<p class="rintro">항공기는 ' + esc(depName ? depName + '을 이륙하여' : (f ? f.dep + '에서 이륙하여' : '')) +
+      ' ' + esc(route) + ' 순으로 비행하게 되며, FIR별 제한 사항은 다음과 같습니다.</p>' +
+    '<h2 class="rtitle">[FIR별 운항 분석 보고서] ' + esc(title) + '</h2>' +
+    secs +
+    '<div class="rfoot"><b>이 보고서가 말할 수 있는 것</b>' +
+      '<p>거리·고도·시각·조항 대조로 근거를 낸 항목이 ' + tot.computed + '건, ' +
+      '원문을 읽어야 하는 항목이 ' + (tot.total - tot.computed) + '건' +
+      (tot.critical ? '이며 그중 운항 직결 필수가 ' + tot.critical + '건입니다.' : '입니다.') +
+      ' 계산되지 않은 항목에 대해 이 보고서는 아무것도 판정하지 않았습니다. ' +
+      '준수 여부의 최종 판단은 조종사가 합니다.</p></div>' +
+  '</div>';
+}
+
 function firSummary() {
   const b = DATA.firBriefing;
   if (!b || !b.segments.length) return '';
@@ -650,6 +781,7 @@ function segs() {
       .map(([k, t]) => '<button class="seg" data-f="' + k + '" aria-pressed="' + (k === filter) + '">' +
         t + '<span class="n">' + n(k) + '</span></button>').join('') +
     '<span class="views">' +
+      '<button class="view" data-v="report" aria-pressed="' + (view === 'report') + '">요약</button>' +
       '<button class="view" data-v="list" aria-pressed="' + (view === 'list') + '">목록</button>' +
       '<button class="view" data-v="raw" aria-pressed="' + (view === 'raw') + '"' +
         (LAYOUT ? '' : ' disabled title="PDF를 열었을 때만 됩니다"') + '>원문 PDF</button>' +
@@ -657,6 +789,7 @@ function segs() {
   document.querySelectorAll('.seg').forEach((b) => b.addEventListener('click', () => {
     filter = b.dataset.f; segs();
     if (view === 'list') { render(); window.scrollTo({ top: 0, behavior: 'smooth' }); }
+    else if (view === 'report') setView('report');
   }));
   document.querySelectorAll('.view').forEach((b) => b.addEventListener('click', () => {
     if (b.hasAttribute('disabled')) return;
@@ -827,10 +960,11 @@ function renderRaw() {
 function setView(v) {
     view = v;
     document.getElementById('out').hidden = (v !== 'list');
-    const raw = document.getElementById('raw');
-    raw.hidden = (v !== 'raw');
+    document.getElementById('report').hidden = (v !== 'report');
+    document.getElementById('raw').hidden = (v !== 'raw');
     document.querySelectorAll('.view').forEach((b) =>
         b.setAttribute('aria-pressed', String(b.dataset.v === v)));
+    if (v === 'report') document.getElementById('report').innerHTML = summaryReport();
     if (v === 'raw') renderRaw();
     else if (pageObserver) pageObserver.disconnect();
 }
@@ -845,7 +979,7 @@ function show(fullText, name) {
       DATA = analyseFlight(fullText);
       PAGE_MARKS = null;                 // marks belong to this document only
       document.getElementById('intake').style.display = 'none';
-      header(name); segs(); setView('list'); render();
+      header(name); segs(); render(); setView('report');
     } catch (e) {
       out.innerHTML = '<div class="err">분석에 실패했습니다: ' + esc(e && e.message) + '</div>';
     }
