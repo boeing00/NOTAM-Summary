@@ -47,7 +47,9 @@ python analyze_notam.py "C:\경로\비행문서.pdf" --open
 
 ```
 NOTAM-Summary/
-├── index.html            # 🌐 iPad 최적화 EFB 웹앱 대시보드
+├── index.html            # 🌐 iPad 화면 (접속 주소 /index)
+├── desktop.html          # 🖥 데스크톱 화면
+├── ipad.html             # ↪ 옛 주소 → /index 로 이동
 ├── notam_engine.js       # ⚙️ 100% 클라이언트 사이드 NOTAM 파서 & 항로 검증 엔진
 ├── manifest.json         # 📱 iPad 홈 화면 PWA 설정
 ├── sw.js                 # ✈️ 기내 오프라인 캐싱 Service Worker

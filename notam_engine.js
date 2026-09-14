@@ -2,7 +2,7 @@
  * NOTAM & Route Compliance engine.
  *
  * Everything here is pure: text in, structured findings out. No DOM, no
- * rendering, no app state. index.html and ipad.html both load this file and
+ * rendering, no app state. desktop.html and index.html (iPad view) both load this file and
  * share one engine, so a fix lands in both at once.
  *
  * The one browser dependency is `pdfjsLib`, used only by

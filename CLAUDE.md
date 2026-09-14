@@ -8,7 +8,7 @@
 배포: main 푸시 → GitHub Pages, 약 30~60초. 확인은 아래로.
 
 ```bash
-curl -s "https://boeing00.github.io/NOTAM-Summary/index.html?cb=$RANDOM" | grep -c parseCdrTable
+curl -s "https://boeing00.github.io/NOTAM-Summary/desktop.html?cb=$RANDOM" | grep -c parseCdrTable
 ```
 
 ## 파일
@@ -16,8 +16,8 @@ curl -s "https://boeing00.github.io/NOTAM-Summary/index.html?cb=$RANDOM" | grep 
 | 파일 | 역할 |
 |---|---|
 | `notam_engine.js` | **엔진.** 순수 함수만. DOM·렌더·앱 상태 없음. 두 화면이 공유한다 |
-| `index.html` | 데스크톱 화면. UI·스타일·브리핑 렌더 |
-| `ipad.html` | 아이패드 화면. **요약**(FIR별 보고서) · 목록(PACKAGE 1·3 주제별) · 원문 PDF 세 뷰 |
+| `desktop.html` | 데스크톱 화면. UI·스타일·브리핑 렌더 |
+| `index.html` | 아이패드 화면 (주소 `/index`, 루트 `/`). **요약**(FIR별 보고서) · 목록(PACKAGE 1·3 주제별) · 원문 PDF 세 뷰 |
 | `coastline.js` | 해안선 좌표(Natural Earth 1:50m, 퍼블릭 도메인). 위치도 배경 |
 | `aar223_text.js` / `aar202_text.js` | 번들 샘플. OFP 원문 전체를 JS 문자열 하나로 담고 있음 |
 | `sw.js`, `manifest.json` | PWA |
@@ -32,7 +32,7 @@ curl -s "https://boeing00.github.io/NOTAM-Summary/index.html?cb=$RANDOM" | grep 
 node --check notam_engine.js
 python -c "
 import io,re
-s=io.open('index.html',encoding='utf-8').read()
+s=io.open('desktop.html',encoding='utf-8').read()
 io.open('chk.js','w',encoding='utf-8',newline='\n').write(re.findall(r'<script>([\s\S]*?)</script>',s)[-1])
 " && node --check chk.js && rm chk.js
 ```
@@ -84,7 +84,7 @@ OFP는 NOTAM을 세 묶음으로 나눠 인쇄한다. 4편 샘플 전부 형식�
 주제 헤더는 **다음 NOTAM 헤더 전에 놓여 앞 NOTAM 본문으로 샌다.** `◼`가 나오면 블록을
 끊는다 — `[DEST]` 누출과 같은 계열이고, 안 끊으면 마지막 항목이 `... U/S ◼ RUNWAY LIGHT`가 된다.
 
-## 원문 PDF 위에 표시하기 (`ipad.html` 원문 뷰)
+## 원문 PDF 위에 표시하기 (`index.html` 원문 뷰)
 
 `extractPdfLayout()`이 텍스트와 **좌표를 한 번에** 낸다. 조각마다 `fullText` 오프셋과
 페이지 위 상자(y는 위에서부터)를 갖고, NOTAM은 자기 문자범위(`at`/`to`)를 갖는다.
@@ -526,3 +526,10 @@ CDN 파일은 버전 고정이고 기내 와이파이에서 재다운로드가 �
 | pilot_Briefing_tool | `C:\Users\moons\AndroidStudioProjects\pilot_Briefing_tool` | Vite+React EFB, Gemini 브라우저 직접 호출 |
 | OFP-Analyzer | `C:\Users\moons\OFP-Analyzer` | 단일 HTML CFP 분석기 (`build.js`로 합침) |
 | NOTAM-Briefer | `C:\Users\moons\NOTAM-Briefer` | 4탭 브리핑 앱 |
+
+
+## 주소 체계 (2026-09-14 변경)
+
+아이패드 화면을 `index.html` 로 옮겼다 — 접속 주소는 `https://boeing00.github.io/NOTAM-Summary/index` (루트 `/` 도 같다).
+데스크톱 화면은 `desktop.html`. 옛 `ipad.html` 은 `./index` 로 넘기는 껍데기만 남겼다
+(옛 주소로 홈 화면에 추가해 둔 아이패드가 빈 화면이 되지 않게). 위 과거 기록 속 `ipad.html` 은 지금의 `index.html` 이다.

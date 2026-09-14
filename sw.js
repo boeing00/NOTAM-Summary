@@ -1,8 +1,8 @@
-const CACHE_NAME = 'notam-efb-v15';
+const CACHE_NAME = 'notam-efb-v16';
 const ASSETS = [
   './',
   './index.html',
-  './ipad.html',
+  './desktop.html',
   './coastline.js?v=2',
   './notam_engine.js?v=3.4',
   './aar223_text.js?v=2.6',
@@ -44,34 +44,34 @@ self.addEventListener('fetch', (e) => {
   if (e.request.method !== 'GET') return;
   if (new URL(e.request.url).protocol.startsWith('chrome-extension')) return;
 
-  e.respondWith((async () => {
-    const cached = await caches.match(e.request);
+  // The network fetch is started once and outlives the timeout. Before this,
+  // a fetch slower than the deadline returned the cached copy and its late
+  // response was thrown away - so on slow cabin/LTE links the cache was never
+  // refreshed and the tablet stayed on the old version indefinitely.
+  const cachedP = caches.match(e.request);
+  const networkP = fetch(sameOrigin(e.request) ? new Request(e.request, { cache: 'reload' }) : e.request)
+    .then((r) => {
+      if (r && r.status === 200) {
+        const clone = r.clone();
+        return caches.open(CACHE_NAME).then((c) => c.put(e.request, clone)).then(() => r);
+      }
+      return r;
+    });
+  e.waitUntil(networkP.catch(() => {}));
 
+  e.respondWith((async () => {
+    const cached = await cachedP;
     try {
-      const networkRes = await new Promise((resolve, reject) => {
+      return await new Promise((resolve, reject) => {
         const timer = setTimeout(() => reject(new Error('timeout')), NETWORK_TIMEOUT_MS);
-        // Network-first only means network-first if the fetch actually goes to
-        // the network. GitHub Pages serves HTML with Cache-Control: max-age=600,
-        // and a plain fetch() is served out of the browser's HTTP cache for
-        // those ten minutes - so a reload after a deploy kept showing the old
-        // page even with no service worker involved. Same-origin requests
-        // therefore bypass the HTTP cache; the CDN files are left alone, since
-        // they are version-pinned and re-downloading them on cabin wifi costs
-        // more than it saves.
-        fetch(sameOrigin(e.request) ? new Request(e.request, { cache: 'reload' }) : e.request).then(
+        networkP.then(
           (r) => { clearTimeout(timer); resolve(r); },
           (err) => { clearTimeout(timer); reject(err); }
         );
       });
-
-      if (networkRes && networkRes.status === 200) {
-        const clone = networkRes.clone();
-        caches.open(CACHE_NAME).then((cache) => cache.put(e.request, clone));
-      }
-      return networkRes;
     } catch {
       if (cached) return cached;
-      throw new Error('offline and not cached: ' + e.request.url);
+      return networkP;            // nothing cached: wait for the network after all
     }
   })());
 });

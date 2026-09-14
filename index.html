@@ -1,1555 +1,1480 @@
-<!DOCTYPE html>
-<html lang="ko" class="dark">
+<!doctype html>
+<html lang="ko">
 <head>
-    <meta charset="UTF-8">
-    <meta name="viewport" content="width=device-width, initial-scale=1.0, maximum-scale=1.0, user-scalable=no">
-    <meta name="apple-mobile-web-app-capable" content="yes">
-    <meta name="apple-mobile-web-app-status-bar-style" content="black-translucent">
-    <meta name="apple-mobile-web-app-title" content="NOTAM EFB">
-    <meta http-equiv="Cache-Control" content="no-cache, no-store, must-revalidate" />
-    <meta http-equiv="Pragma" content="no-cache" />
-    <meta http-equiv="Expires" content="0" />
-    <title>Pilot NOTAM & Route Compliance EFB Report</title>
-    
-    <!-- PWA Manifest -->
-    <link rel="manifest" href="./manifest.json">
-    <link rel="apple-touch-icon" href="https://cdn-icons-png.flaticon.com/512/7893/7893979.png">
+<meta charset="utf-8">
+<meta name="viewport" content="width=device-width, initial-scale=1, viewport-fit=cover">
+<meta name="apple-mobile-web-app-capable" content="yes">
+<meta name="apple-mobile-web-app-status-bar-style" content="black-translucent">
+<meta name="apple-mobile-web-app-title" content="NOTAM">
+<link rel="manifest" href="./manifest.json">
+<title>NOTAM · 조종석 뷰</title>
 
-    <!-- Tailwind CSS CDN -->
-    <script src="https://cdn.tailwindcss.com"></script>
-    <!-- Lucide Icons -->
-    <script src="https://unpkg.com/lucide@latest"></script>
-    <!-- PDF.js CDN (Mozilla) -->
-    <script src="https://cdnjs.cloudflare.com/ajax/libs/pdf.js/3.11.174/pdf.min.js"></script>
-    <!-- Pre-bundled Full Flight Datasets for Instant Preview -->
-    <script src="./aar223_text.js?v=2.6"></script>
-    <script src="./aar202_text.js?v=2.6"></script>
+<script src="https://cdnjs.cloudflare.com/ajax/libs/pdf.js/3.11.174/pdf.min.js"></script>
+<script src="./aar223_text.js?v=2.6"></script>
+<script src="./aar202_text.js?v=2.6"></script>
+<script src="./coastline.js?v=2"></script>
+<script src="./notam_engine.js?v=3.4"></script>
 
-    <!-- Shared engine: also loaded by ipad.html -->
-    <script src="./notam_engine.js?v=3.4"></script>
+<style>
+  :root{
+    --bg:#0a0f1a; --panel:#101827; --panel2:#151f31; --line:#22304a;
+    --ink:#e6edf7; --ink2:#9fb0c9; --ink3:#6c7f9b;
+    --crit:#ff5a5a; --crit-bg:#3a1114;
+    --calc:#3fd68a; --calc-bg:#0d2b1e;
+    --rev:#ffb340;  --rev-bg:#33240a;
+    --appl:#5aa9ff; --appl-bg:#0e2138;
+    --mute:#4a5a72; --mute-bg:#0e1522;
+    --tap:44px;
+  }
+  *{box-sizing:border-box;-webkit-tap-highlight-color:transparent}
+  html,body{margin:0;padding:0}
+  body{
+    background:var(--bg);color:var(--ink);
+    font:16px/1.55 -apple-system,BlinkMacSystemFont,"SF Pro Text","Apple SD Gothic Neo","Noto Sans KR",sans-serif;
+    padding:env(safe-area-inset-top) env(safe-area-inset-right) env(safe-area-inset-bottom) env(safe-area-inset-left);
+    -webkit-text-size-adjust:100%;
+  }
+  .wrap{max-width:1100px;margin:0 auto;padding:0 16px 96px}
 
-    <script>
-        pdfjsLib.GlobalWorkerOptions.workerSrc = 'https://cdnjs.cloudflare.com/ajax/libs/pdf.js/3.11.174/pdf.worker.min.js';
-        tailwind.config = {
-            darkMode: 'class',
-            theme: {
-                extend: {
-                    colors: {
-                        slate: {
-                            850: '#151f32',
-                            950: '#0a0f1d',
-                        }
-                    }
-                }
-            }
-        };
-    </script>
-    <style>
-        ::-webkit-scrollbar { width: 6px; height: 6px; }
-        ::-webkit-scrollbar-track { background: #0f172a; }
-        ::-webkit-scrollbar-thumb { background: #334155; border-radius: 3px; }
-        .shaded-item {
-            opacity: 0.52;
-            filter: grayscale(65%);
-            border-color: rgba(51, 65, 85, 0.5) !important;
-            background-color: rgba(15, 23, 42, 0.75) !important;
-        }
-        .shaded-item:hover {
-            opacity: 0.95;
-            filter: grayscale(0%);
-        }
-        @media print {
-            header, .no-print { display: none !important; }
-            body { background: white !important; color: black !important; }
-            .bg-slate-900, .bg-slate-950 { background: white !important; border-color: #ddd !important; }
-            .text-slate-100, .text-slate-200, .text-slate-300 { color: black !important; }
-            .text-slate-400, .text-slate-500 { color: #555 !important; }
-        }
-    </style>
+  .bar{position:sticky;top:0;z-index:20;background:rgba(10,15,26,.94);
+       backdrop-filter:saturate(1.4) blur(12px);border-bottom:1px solid var(--line);
+       margin:0 -16px;padding:10px 16px 0}
+  .flt{display:flex;align-items:baseline;gap:10px;flex-wrap:wrap;min-height:26px}
+  .flt b{font-size:19px;letter-spacing:.3px}
+  .flt span{color:var(--ink2);font-size:13px;font-variant-numeric:tabular-nums}
+  .segs{display:flex;gap:6px;overflow-x:auto;padding:10px 0;scrollbar-width:none}
+  .segs::-webkit-scrollbar{display:none}
+  .seg{flex:0 0 auto;min-height:var(--tap);display:flex;align-items:center;gap:7px;
+       padding:0 15px;border-radius:11px;border:1px solid var(--line);
+       background:var(--panel);color:var(--ink2);font-size:14px;font-weight:600;cursor:pointer}
+  .seg[aria-pressed="true"]{background:var(--appl-bg);border-color:#2d5c8f;color:#cfe4ff}
+  .seg .n{font-variant-numeric:tabular-nums;opacity:.75;font-weight:500}
+
+  .intake{margin-top:18px;border:1px dashed #2c3f5e;border-radius:16px;background:var(--panel);
+          padding:26px 18px;text-align:center}
+  .intake h1{margin:0 0 6px;font-size:18px;font-weight:700}
+  .intake p{margin:0 0 16px;color:var(--ink3);font-size:13.5px}
+  .btns{display:flex;gap:8px;justify-content:center;flex-wrap:wrap}
+  .btn{min-height:var(--tap);display:inline-flex;align-items:center;padding:0 18px;border-radius:11px;
+       border:1px solid #2d5c8f;background:var(--appl-bg);color:#cfe4ff;font-size:14.5px;font-weight:600;cursor:pointer}
+  .btn.ghost{background:var(--panel2);border-color:var(--line);color:var(--ink2)}
+  .intake.drag{border-color:#5aa9ff;background:#0e2138}
+
+  .pkg{margin-top:20px;border:1px solid var(--line);border-radius:16px;overflow:hidden;background:var(--panel)}
+  .pkg>summary{list-style:none;min-height:56px;display:flex;align-items:center;gap:12px;padding:12px 16px;cursor:pointer;background:var(--panel2)}
+  .pkg>summary::-webkit-details-marker{display:none}
+  .chev{color:var(--ink3);font-size:13px;transition:transform .15s}
+  details[open]>summary .chev{transform:rotate(90deg)}
+  .pkg h2{margin:0;font-size:16px;font-weight:700}
+  .sub{color:var(--ink3);font-size:12.5px;margin-top:2px}
+  .cnt{margin-left:auto;color:var(--ink2);font-size:13px;font-variant-numeric:tabular-nums}
+  .excl h2{color:var(--ink2);font-weight:600}
+  .excl{background:var(--mute-bg)}
+
+  .cat{border-top:1px solid var(--line)}
+  .cat>summary{list-style:none;min-height:46px;display:flex;align-items:center;gap:10px;padding:9px 16px;cursor:pointer}
+  .cat>summary::-webkit-details-marker{display:none}
+  .cat h3{margin:0;font-size:18px;font-weight:800;color:#e2edfa;letter-spacing:.2px}
+  .cat .src{color:var(--ink3);font-size:11.5px;font-family:ui-monospace,Menlo,monospace}
+  .list{padding:4px 8px 10px}
+  .sub2{margin:6px 0 12px;border-left:2px solid #1f3550;padding-left:10px}
+  .sub2h{display:flex;align-items:baseline;gap:9px;margin:10px 0 5px;
+         font:700 16px/1.25 ui-monospace,SFMono-Regular,Menlo,monospace;
+         color:#a8cdf5;letter-spacing:.5px}
+  .sub2h .cnt{margin-left:0;color:var(--ink3);font-weight:500;font-size:12.5px}
+  .empty{padding:22px 16px;color:var(--ink3);font-size:13.5px;text-align:center}
+
+  .n{border:1px solid var(--line);border-radius:13px;margin:8px 0;overflow:hidden;background:#0d1523}
+  .n>summary{list-style:none;display:flex;gap:12px;padding:12px 14px;min-height:var(--tap);align-items:flex-start;cursor:pointer}
+  .n>summary::-webkit-details-marker{display:none}
+  .rail{flex:0 0 6px;align-self:stretch;border-radius:3px;background:var(--mute)}
+  .n[data-t="crit"] .rail{background:var(--crit)}
+  .n[data-t="calc"] .rail{background:var(--calc)}
+  .n[data-t="rev"] .rail{background:var(--rev)}
+  .n[data-t="appl"] .rail{background:var(--appl)}
+  .n[data-t="shade"]{opacity:.55}
+  .n[data-t="shade"] .hdr b{color:var(--ink2);font-weight:600}
+  .hdr{flex:1;min-width:0}
+  .l1{display:flex;align-items:center;gap:8px;flex-wrap:wrap}
+  .hdr b{font:600 15.5px/1.3 ui-monospace,SFMono-Regular,Menlo,monospace;letter-spacing:.4px}
+  .l2{color:var(--ink3);font-size:12.5px;margin-top:3px;font-variant-numeric:tabular-nums}
+  .l3{color:var(--ink2);font-size:13.5px;margin-top:6px;display:-webkit-box;-webkit-line-clamp:2;-webkit-box-orient:vertical;overflow:hidden}
+  .tag{flex:0 0 auto;font-size:11.5px;font-weight:700;padding:3px 8px;border-radius:7px;border:1px solid transparent;white-space:nowrap}
+  .t-crit{background:var(--crit-bg);color:#ffb0b0;border-color:#6d2226}
+  .t-calc{background:var(--calc-bg);color:#8ef0bd;border-color:#1d5c40}
+  .t-rev{background:var(--rev-bg);color:#ffd490;border-color:#6b4a12}
+  .t-appl{background:var(--appl-bg);color:#bcd9ff;border-color:#25507e}
+  .t-shade{background:var(--mute-bg);color:var(--ink3);border-color:#2a3a52}
+  .chips{display:flex;gap:5px;flex-wrap:wrap;margin-top:7px}
+  .chip{font:600 11.5px/1 ui-monospace,Menlo,monospace;padding:4px 7px;border-radius:6px;background:#132133;color:#9ec7ff;border:1px solid #24405f}
+  .chip.calc{background:var(--calc-bg);color:#8ef0bd;border-color:#1d5c40}
+  .chip.warn{background:var(--rev-bg);color:#ffd490;border-color:#6b4a12}
+  .body{padding:0 14px 14px 32px;border-top:1px solid var(--line);margin-top:2px}
+  /* ---- 요약 보고서 ---------------------------------------------------- */
+  .report{margin-top:18px;max-width:820px}
+  .rintro{margin:0 0 16px;font-size:15px;line-height:1.75;color:var(--ink)}
+  .rtitle{margin:0 0 20px;padding-bottom:10px;border-bottom:2px solid #22406a;
+          font-size:19px;font-weight:800;color:#e2edfa;letter-spacing:.2px}
+  .rsec{margin:0 0 26px}
+  .rsec h3{margin:0 0 5px;font-size:17px;font-weight:800;color:#dcebfb;
+           display:flex;align-items:baseline;gap:8px;flex-wrap:wrap}
+  .rsec h3 .no{color:#5aa9ff}
+  .rsec h3 .rcode{font:600 12px/1 ui-monospace,Menlo,monospace;color:var(--ink3)}
+  .rlead{margin:0 0 12px;color:var(--ink2);font-size:13.5px;line-height:1.7}
+  .ri{margin:0 0 13px;padding-left:14px;border-left:2px solid #24405f}
+  .ri.crit{border-left-color:var(--crit)}
+  .rt{font-size:14.5px;font-weight:700;color:#cfe4ff;line-height:1.5}
+  .rt .rid{font:600 11.5px/1 ui-monospace,Menlo,monospace;color:var(--ink3);font-weight:500}
+  .rt .rc{font-size:10.5px;font-weight:700;padding:2px 6px;border-radius:5px;
+          background:var(--crit-bg);color:#ffb0b0;vertical-align:1px}
+  .rr{display:grid;grid-template-columns:64px 1fr;gap:9px;margin-top:5px;
+      font-size:13.5px;line-height:1.65;color:var(--ink2);align-items:baseline}
+  .rr>span{font-size:11.5px;font-weight:700;color:var(--ink3)}
+  .rr.im{color:#8ef0bd}
+  .ivs{display:block}
+  .iv{margin:0 0 3px;line-height:1.6}
+  .iv:last-child{margin-bottom:0}
+  .iv.calc{color:#8ef0bd}
+  .iv.warn{color:#ffd490}
+  .iv.unk{color:#b9a0ff}
+  .iv.plain{color:var(--ink3);font-size:12.5px}
+  .iv b{color:#cfe4ff;font-weight:700}
+  .rnone{padding-left:14px;border-left:2px solid #1c2a3d;color:var(--ink3);
+         font-size:13px;line-height:1.6}
+  .rfoot{margin-top:26px;padding:14px 16px;border-radius:12px;
+         border:1px solid #2a3a52;background:#0d1522}
+  .rfoot b{display:block;margin-bottom:5px;font-size:13px;color:#cfe4ff}
+  .rfoot p{margin:0;color:var(--ink2);font-size:13px;line-height:1.7}
+
+  /* ---- 항로 개요도 ---------------------------------------------------- */
+  .imap{margin:8px 0 0;border:1px solid #1f3550;border-radius:10px;overflow:hidden;background:#0b1420}
+  .imap>summary{list-style:none;display:flex;align-items:center;gap:7px;min-height:38px;
+                padding:7px 11px;cursor:pointer;font-size:12.5px;font-weight:700;color:#8fb4e0}
+  .imap>summary::-webkit-details-marker{display:none}
+  .imapbody{padding:8px 10px 10px}
+                  min-height:var(--tap);padding:10px 14px;cursor:pointer;
+                  background:var(--panel2);font-size:14.5px;font-weight:700;color:#cfe4ff}
+  .rmap{display:block;width:100%;height:auto;background:#070c14;
+        border:1px solid #1a2739;border-radius:8px}
+  .rmap .land{fill:none;stroke:#33506e;stroke-width:1.3;stroke-linejoin:round}
+  .rmap .gl{stroke:#1b2a3f;stroke-width:1}
+  .rmap .gt{fill:#4a5a72;font:10px ui-monospace,Menlo,monospace}
+  .rmap .rt{fill:none;stroke:#5aa9ff;stroke-width:2.2;stroke-linejoin:round}
+  .rmap .wp{fill:#cfe4ff}
+  .rmap .wl{fill:#8fb4e0;font:10px ui-monospace,Menlo,monospace}
+  .rmap .sh{fill:rgba(120,140,170,.16);stroke:#7f93ad;stroke-width:1.6}
+  .rmap .sh.crit{fill:rgba(255,80,80,.18);stroke:#ff5a5a}
+  .rmap .sh.calc{fill:rgba(63,214,138,.15);stroke:#3fd68a}
+  .rmap .sh.rev{fill:rgba(255,179,64,.15);stroke:#ffb340}
+  .rmap .sh.appl{fill:rgba(90,169,255,.13);stroke:#5aa9ff}
+  .rmap .sh.ban{stroke-dasharray:6 3;stroke-width:2}
+  .rmap .sh.gate{fill:none;stroke-dasharray:5 4}
+  .rmap .lead{stroke:#ffd490;stroke-width:1.6;stroke-dasharray:4 3;fill:none}
+  .rmap .near{fill:#ffd490}
+  .rmap .nl{fill:#ffd490;font:11px ui-monospace,Menlo,monospace}
+  .mnote{margin:9px 0 0;color:var(--ink3);font-size:11.5px;line-height:1.6}
+
+  /* ---- FIR summary --------------------------------------------------- */
+  .fir summary{background:#122036}
+  .firbody{padding:6px 14px 14px}
+  .fseg{border-top:1px solid #1a2c44}
+  .fseg:first-child{border-top:none}
+  .fseg>summary{list-style:none;padding:11px 0;cursor:pointer;min-height:var(--tap)}
+  .fseg>summary::-webkit-details-marker{display:none}
+  .fseg>summary .chev{font-size:12px;color:var(--ink3);transition:transform .15s;
+                      display:inline-block;width:12px}
+  .fseg[open]>summary .chev{transform:rotate(90deg)}
+  .fh{display:flex;align-items:baseline;gap:9px;flex-wrap:wrap}
+  .fh b{font:800 19px/1.25 -apple-system,BlinkMacSystemFont,"Apple SD Gothic Neo",sans-serif;color:#dcebfb}
+  .fh .code{font:600 11.5px/1 ui-monospace,Menlo,monospace;color:var(--ink3);letter-spacing:.5px}
+  .fmeta{margin-top:4px;color:var(--ink3);font-size:12px}
+  .fmeta .warnish{color:#c9a24a}
+  .fh .t{font-size:11.5px;color:var(--ink3);font-variant-numeric:tabular-nums}
+  .fh .t.warnish{color:#c9a24a}
+  .fh .n{margin-left:auto;font-size:12px;color:var(--ink3);font-variant-numeric:tabular-nums}
+  .fstat{display:flex;gap:6px;flex-wrap:wrap;margin-top:6px}
+  .fstat .k{font-style:normal;font-size:11px;font-weight:700;padding:3px 7px;border-radius:6px}
+  .fstat .crit{background:var(--crit-bg);color:#ffb0b0}
+  .fstat .calc{background:var(--calc-bg);color:#8ef0bd}
+  .fstat .rev{background:var(--rev-bg);color:#ffd490}
+  .fstat .mute{background:var(--mute-bg);color:var(--ink3)}
+  ul.fitems{margin:0 0 12px;padding:0 0 0 21px;list-style:none}
+  .fnone{margin:0 0 12px;padding:0 0 0 21px;color:var(--ink3);font-size:12.5px;line-height:1.55}
+  ul.fitems li{padding:8px 0 9px 11px;border-left:2px solid #22364f;margin-bottom:9px;
+               font-size:13px;color:var(--ink2);line-height:1.55}
+  ul.fitems li.crit{border-left-color:var(--crit)}
+  ul.fitems .ttl{display:flex;align-items:center;gap:7px;flex-wrap:wrap;margin-bottom:3px}
+  ul.fitems b{font:700 13px/1.4 ui-monospace,Menlo,monospace;color:#9ec7ff}
+  ul.fitems .cf{font-size:10.5px;font-weight:700;padding:2px 6px;border-radius:5px;
+                background:var(--crit-bg);color:#ffb0b0}
+  ul.fitems .sj{font:700 10.5px/1 ui-monospace,Menlo,monospace;padding:3px 6px;border-radius:5px;
+                background:#132133;color:#9ec7ff}
+  ul.fitems .pg{font:600 10.5px/1 ui-monospace,Menlo,monospace;padding:3px 6px;border-radius:5px;
+                background:#161f2e;color:var(--ink3)}
+  ul.fitems .wh,ul.fitems .im{display:grid;grid-template-columns:58px 1fr;gap:8px;
+                              align-items:baseline;margin-top:2px}
+  ul.fitems .wh>span,ul.fitems .im>span{font-size:11px;font-weight:700;color:var(--ink3)}
+  ul.fitems .wh{color:var(--ink2)}
+  ul.fitems .im{color:#8ef0bd;font-size:12.5px}
+  ul.fitems .im i{color:var(--ink3);font-style:normal}
+  .firbody .foot{margin:12px 0 0;padding-top:10px;border-top:1px solid #1a2c44;
+                 color:var(--ink2);font-size:12.5px;line-height:1.6}
+  .cond{margin:12px 0 0;padding:11px 12px;border-radius:10px;background:#0c1826;border:1px solid #1d3550}
+  .cond h4{margin:0 0 8px;font-size:12px;color:#8fb4e0;font-weight:700;letter-spacing:.5px;
+           display:flex;gap:8px;align-items:baseline;flex-wrap:wrap}
+  .cond h4 span{color:var(--ink3);font-weight:500;letter-spacing:0}
+  .cl{display:grid;grid-template-columns:34px 74px 1fr;gap:6px 8px;padding:6px 0;
+      border-top:1px solid #16283e;font-size:13px;align-items:baseline}
+  .cl:first-of-type{border-top:none}
+  .cl.hdr{display:block;border-top:1px solid #16283e;padding:8px 0 4px;
+          color:var(--ink3);font-size:12px;font-weight:700}
+  .cl .ref{font:700 12px/1.4 ui-monospace,Menlo,monospace;color:#7f93ad}
+  .cl .vd{font-size:11.5px;font-weight:700;white-space:nowrap}
+  .cl .ws{color:var(--ink);font-size:12.5px}
+  .cl .tx{grid-column:2 / -1;color:var(--ink3);font-size:11.5px;line-height:1.5;
+          font-family:ui-monospace,Menlo,monospace}
+  .cl.v-ok .vd{color:#8ef0bd}
+  .cl.v-check .vd{color:#ffd490}
+  .cl.v-unk .vd{color:#b9a0ff}
+  .cl.v-na .vd,.cl.v-man .vd{color:var(--ink3)}
+  .cl.v-na .ws,.cl.v-man .ws{color:var(--ink2)}
+  .cond .foot{margin:9px 0 0;padding-top:8px;border-top:1px solid #16283e;
+              color:var(--ink3);font-size:11.5px;line-height:1.55}
+  .why{margin:12px 0 0;padding:11px 12px;border-radius:10px;background:#0f1b2b;border:1px solid #1d2d45;color:var(--ink2);font-size:13.5px}
+  .why h4{margin:0 0 5px;font-size:12px;color:var(--ink3);font-weight:700;letter-spacing:.6px}
+  pre.raw{margin:12px 0 0;padding:12px;border-radius:10px;background:#080d16;border:1px solid #1a2739;color:#bcd0e8;
+          font:12.5px/1.6 ui-monospace,SFMono-Regular,Menlo,monospace;white-space:pre-wrap;word-break:break-word;overflow-x:auto}
+  .legend{margin-top:18px;display:flex;gap:14px;flex-wrap:wrap;color:var(--ink3);font-size:12.5px}
+  .legend i{display:inline-block;width:10px;height:10px;border-radius:3px;margin-right:5px;vertical-align:-1px}
+  .ver{margin-top:10px;display:flex;align-items:center;justify-content:space-between;gap:10px;flex-wrap:wrap;font-size:12px;color:var(--ink2)}
+  .ver b{font-family:ui-monospace,Menlo,monospace;color:var(--ink)}
+  .upd{position:fixed;left:50%;bottom:18px;transform:translateX(-50%);z-index:60;background:#1d3a5f;border:1px solid #4d86c9;color:#fff;border-radius:12px;padding:12px 16px;font-size:14px;box-shadow:0 10px 30px rgba(0,0,0,.5);cursor:pointer;max-width:92vw}
+  .note{margin-top:14px;padding:12px 14px;border-radius:12px;border:1px solid #2a3a52;background:#0d1522;color:var(--ink2);font-size:13px}
+  .busy{padding:50px 0;text-align:center;color:var(--ink3);font-size:14px}
+  .err{margin-top:16px;padding:14px;border-radius:12px;border:1px solid #6d2226;background:var(--crit-bg);color:#ffb0b0;font-size:13.5px}
+
+  /* ---- RAW: the real PDF, marked in place ---------------------------- */
+  .views{display:flex;gap:6px;margin-left:auto}
+  .view{min-height:36px;display:flex;align-items:center;padding:0 13px;border-radius:9px;
+        border:1px solid var(--line);background:var(--panel);color:var(--ink2);
+        font-size:13.5px;font-weight:600;cursor:pointer}
+  .view[aria-pressed="true"]{background:var(--appl-bg);border-color:#2d5c8f;color:#cfe4ff}
+  #raw{margin-top:16px}
+  .pg{position:relative;margin:0 auto 14px;background:#fff;border-radius:6px;overflow:hidden;
+      box-shadow:0 2px 14px rgba(0,0,0,.5)}
+  .pg canvas{display:block;width:100%;height:auto}
+  .pg .ph{position:absolute;inset:0;display:flex;align-items:center;justify-content:center;
+          color:#8a97a8;font-size:13px;background:#f4f6f9}
+  .pgno{position:absolute;right:8px;top:6px;z-index:3;font:600 11px/1 ui-monospace,Menlo,monospace;
+        color:#5b6b80;background:rgba(255,255,255,.82);padding:3px 6px;border-radius:5px}
+  .mk{position:absolute;pointer-events:none;border-radius:2px}
+  /* The mark must not compete with the words it is marking. A 2px hard border
+     on every line boxed the text in and made the one NOTAM that matters most
+     the hardest to read. Thin, low-contrast outline; the badge carries the
+     weight instead. */
+  .mk.crit {background:rgba(255,80,80,.09);  box-shadow:inset 0 0 0 1px rgba(210,60,60,.34)}
+  .mk.calc {background:rgba(30,200,120,.16); box-shadow:inset 0 0 0 2px rgba(15,150,90,.8)}
+  .mk.rev  {background:rgba(255,175,50,.18); box-shadow:inset 0 -2px 0 0 rgba(200,120,0,.9)}
+  .mk.appl {background:rgba(60,140,255,.13); box-shadow:inset 0 0 0 1px rgba(40,110,220,.55)}
+  .mk.shade{background:rgba(140,150,165,.42)}
+  .mk.pkg2 {background:rgba(160,170,185,.30)}
+  .badge{position:absolute;z-index:2;transform:translateY(-100%);
+         font:700 10.5px/1 ui-monospace,Menlo,monospace;padding:3px 5px;border-radius:4px;
+         color:#fff;white-space:nowrap;pointer-events:none}
+  .badge.crit{background:#d1454b}.badge.calc{background:#127a4d}
+  .badge.rev{background:#a06000}.badge.appl{background:#1f5fb8}
+  .rawbar{position:sticky;top:0;z-index:5;display:flex;gap:8px;align-items:center;flex-wrap:wrap;
+          padding:10px 0;color:var(--ink3);font-size:12.5px}
+  .rawbar .k{display:inline-flex;align-items:center;gap:5px}
+  .rawbar .sw{width:11px;height:11px;border-radius:3px;display:inline-block}
+</style>
 </head>
-<body class="bg-slate-950 text-slate-100 min-h-screen font-sans antialiased selection:bg-amber-500/30 selection:text-amber-200 pb-20">
+<body>
+<div class="wrap">
+  <div class="bar">
+    <div class="flt" id="flt"></div>
+    <div class="segs" id="segs"></div>
+  </div>
+  <div id="report" hidden></div>
+  <div id="raw" hidden></div>
 
-    <!-- Top Action Header -->
-    <header class="border-b border-slate-800 bg-slate-900/90 backdrop-blur sticky top-0 z-50 no-print">
-        <div class="max-w-5xl mx-auto px-4 sm:px-6 h-16 flex items-center justify-between">
-            <div class="flex items-center gap-3">
-                <div class="p-2 bg-amber-500/10 border border-amber-500/30 rounded-lg text-amber-400">
-                    <i data-lucide="plane" class="w-5 h-5"></i>
-                </div>
-                <div>
-                    <div class="flex items-center gap-2">
-                        <h1 class="text-base font-bold text-white tracking-wide">NOTAM & Route Compliance EFB</h1>
-                        <span class="text-[10px] px-2 py-0.5 rounded bg-emerald-500/10 border border-emerald-500/30 text-emerald-400 font-mono">Executive & Full Archive</span>
-                    </div>
-                    <p id="headerSubtitle" class="text-xs text-slate-400 font-mono">비행계획서(PDF) 업로드 또는 샘플을 선택하세요</p>
-                </div>
-            </div>
+  <div class="intake" id="intake">
+    <h1>운항계획서(OFP) PDF를 여십시오</h1>
+    <p>기기 안에서만 처리됩니다. 파일은 어디로도 전송되지 않습니다.</p>
+    <div class="btns">
+      <button class="btn" id="pick">PDF 선택</button>
+      <button class="btn ghost" id="s223">샘플 AAR223 JFK→ICN</button>
+      <button class="btn ghost" id="s202">샘플 AAR202 ICN→LAX</button>
+    </div>
+    <input type="file" id="file" accept="application/pdf" hidden>
+  </div>
 
-            <!-- Action Buttons -->
-            <div class="flex items-center gap-2">
-                <button onclick="forceClearCacheAndReload()" title="캐시 삭제 및 최신버전 새로고침" class="p-1.5 rounded-lg border border-slate-700 bg-slate-800 hover:bg-slate-700 text-slate-300 hover:text-amber-300 transition flex items-center gap-1 text-xs">
-                    <i data-lucide="refresh-cw" class="w-3.5 h-3.5"></i>
-                    <span class="hidden sm:inline">새로고침</span>
-                </button>
-                <button onclick="triggerFilePicker()" class="px-3 py-1.5 rounded-lg border border-amber-500/40 bg-amber-500/10 hover:bg-amber-500/20 text-xs font-semibold text-amber-300 flex items-center gap-1.5 transition">
-                    <i data-lucide="file-up" class="w-4 h-4"></i>
-                    <span>PDF 변경/열기</span>
-                </button>
-                <button onclick="window.print()" class="px-3 py-1.5 rounded-lg border border-slate-700 bg-slate-800 hover:bg-slate-700 text-xs font-medium text-slate-200 flex items-center gap-1.5 transition">
-                    <i data-lucide="printer" class="w-4 h-4 text-slate-400"></i>
-                    <span class="hidden sm:inline">인쇄</span>
-                </button>
-            </div>
-        </div>
-    </header>
+  <div id="out"></div>
 
-    <input type="file" id="pdfFileInput" accept="application/pdf" class="hidden" onchange="handleFileSelected(event)" />
+  <div class="legend">
+    <span><i style="background:var(--crit)"></i>운항 직결 필수</span>
+    <span><i style="background:var(--calc)"></i>기계 계산 근거</span>
+    <span><i style="background:var(--rev)"></i>확인 필요</span>
+    <span><i style="background:var(--appl)"></i>내 공항·항로</span>
+    <span><i style="background:var(--mute)"></i>음영 (등화·표지)</span>
+  </div>
+  <div class="note">
+    거리·고도·포함 여부·시각처럼 <b>산술로 계산된 것만 단정</b>합니다. 그 밖은 원문을 띄우고
+    강조만 하며 판단은 조종사가 합니다. 음영 항목도 <b>목록에서 사라지지 않고 접힐 뿐</b>이며,
+    PACKAGE 2는 분석에서만 빠지고 원문은 그대로 남습니다.
+  </div>
+  <div class="ver">
+    <span>화면 버전 <b id="buildTag"></b></span>
+    <button class="btn ghost" id="forceUpdate">최신 버전 받기</button>
+  </div>
+  <div class="upd" id="updBanner" hidden>새 버전이 도착했습니다 — 눌러서 적용 (보던 문서는 다시 여셔야 합니다)</div>
+</div>
 
-    <!-- Main Container -->
-    <main class="max-w-5xl mx-auto px-4 sm:px-6 py-6 space-y-8">
+<script>
+pdfjsLib.GlobalWorkerOptions.workerSrc =
+  'https://cdnjs.cloudflare.com/ajax/libs/pdf.js/3.11.174/pdf.worker.min.js';
 
-        <!-- Top Dropzone / Fast Sample Selector -->
-        <div id="dropzoneCard" class="bg-slate-900 border-2 border-dashed border-slate-700 hover:border-amber-500/50 rounded-2xl p-6 sm:p-8 text-center transition cursor-pointer no-print" onclick="triggerFilePicker()" ondragover="event.preventDefault()" ondrop="handleDrop(event)">
-            <div class="max-w-md mx-auto space-y-3">
-                <div class="w-10 h-10 rounded-full bg-amber-500/10 border border-amber-500/30 text-amber-400 flex items-center justify-center mx-auto">
-                    <i data-lucide="file-text" class="w-5 h-5"></i>
-                </div>
-                <div>
-                    <h2 class="text-sm sm:text-base font-bold text-white">비행계획서(OFP / NOTAM Package) PDF 선택</h2>
-                    <p class="text-xs text-slate-400 mt-0.5">파일을 끌어다 놓거나 탭하여 iPad 파일 앱에서 선택하세요</p>
-                </div>
-                <div class="pt-2 flex flex-wrap items-center justify-center gap-2" onclick="event.stopPropagation()">
-                    <span class="text-xs text-slate-500">샘플 즉시 보기:</span>
-                    <button onclick="loadSampleAAR223()" class="px-2.5 py-1 rounded bg-slate-800 hover:bg-slate-700 border border-slate-700 text-xs font-mono text-amber-300">
-                        AAR223 (JFK ➔ ICN, 491건 전수)
-                    </button>
-                    <button onclick="loadSampleAAR202()" class="px-2.5 py-1 rounded bg-slate-800 hover:bg-slate-700 border border-slate-700 text-xs font-mono text-amber-300">
-                        AAR202 (ICN ➔ LAX, 335건 전수)
-                    </button>
-                </div>
-            </div>
-        </div>
+const esc = (s) => String(s == null ? "" : s)
+  .replace(/&/g, "&amp;").replace(/</g, "&lt;").replace(/>/g, "&gt;");
 
-        <!-- Processing Indicator -->
-        <div id="loadingIndicator" class="hidden bg-slate-900 border border-slate-800 rounded-xl p-8 text-center space-y-3 no-print">
-            <div class="w-8 h-8 border-2 border-amber-400 border-t-transparent rounded-full animate-spin mx-auto"></div>
-            <p class="text-sm font-medium text-slate-200">PDF 전문 추출 및 노선 맞춤형 항로 준수성 검증 중...</p>
-            <p class="text-xs text-slate-500">클라이언트 브라우저에서 100% 안전하게 계산됩니다 (API 0회)</p>
-        </div>
+let DATA = null;
+let filter = "all";
 
-        <!-- Main Document Area -->
-        <div id="mainDocumentArea" class="space-y-8">
+/* Bucket order is deliberate. CRITICAL outranks shading, so an ILS outage is
+   never greyed. Shading outranks every "applies to me" signal, which is the
+   requested behaviour: a light or marking item is greyed even when it is on
+   our airport, in our window. */
+function bucket(it) {
+  if (it.reasonCategory === "CRITICAL") return "crit";
+  if (it.autoShaded) return "shade";
+  const x = it.xc;
+  if (x.geo || x.zones || (x.cdr && x.cdr.length) || x.dailyCheck) return "calc";
+  if (x.needsReview) return "rev";
+  return "appl";
+}
+const LABEL = {
+  crit: ["운항 직결 필수", "t-crit"], calc: ["계산 근거", "t-calc"],
+  rev: ["확인 필요", "t-rev"], appl: ["적용", "t-appl"], shade: ["음영", "t-shade"]
+};
 
-            <!-- Section 1: Executive Cockpit Briefing Report -->
-            <article id="reportDocument" class="bg-slate-900 border border-slate-800 rounded-2xl p-6 sm:p-10 shadow-2xl space-y-8">
-                <!-- Executive Briefing populated here -->
-            </article>
+/* Every chip below is a number the engine computed. Nothing is asserted here. */
+function chips(it) {
+  const x = it.xc, out = [];
+  if (x.geo) out.push(['calc', (x.geo.lateralClear ? "이격 " : "저촉 ") + Math.round(x.geo.minNm) +
+    "NM" + (x.geo.radius ? " (반경 " + x.geo.radius + "NM)" : "")]);
+  ((x.zones && x.zones.banned) || []).forEach((z) => out.push([z.entered ? 'warn' : 'calc',
+    z.entered ? "금지공역 관통" : "금지공역 " + Math.round(z.nearestNm) + "NM"]));
+  ((x.zones && x.zones.gates) || []).forEach((g) => out.push([g.crosses ? 'warn' : 'calc',
+    g.crosses ? "구간선 교차" : "구간선 " + Math.round(g.nearestNm) + "NM"]));
+  (x.cdr || []).forEach((c) => {
+    const v = c.verdict === "INSIDE" ? "개방시간 내" : c.verdict === "OUTSIDE" ? "개방시간 밖"
+            : c.verdict === "PARTIAL" ? "일부만 개방" : "판정불가";
+    out.push([c.verdict === "INSIDE" ? 'calc' : 'warn', "CDR " + c.awy + " · " + v +
+      (c.marginMin != null ? " · 여유 " + c.marginMin + "분" : "")]);
+  });
+  if (x.dailyCheck) {
+    const d = x.dailyCheck;
+    const hh = (m) => String(Math.floor(m / 60)).padStart(2, "0") + String(m % 60).padStart(2, "0");
+    out.push([d.inWindow ? 'warn' : 'calc',
+      "일일창 " + d.spec + " · 진입 " + hh(d.entry) + "Z · " + (d.inWindow ? "창 안" : "창 밖")]);
+  }
+  if (x.conditions) {
+    const n = x.conditions.reduce((a, c) => { a[c.verdict] = (a[c.verdict] || 0) + 1; return a; }, {});
+    const bits = [];
+    if (n.OK) bits.push("충족 " + n.OK);
+    if (n.CHECK) bits.push("확인 " + n.CHECK);
+    if (n.UNKNOWN) bits.push("판정불가 " + n.UNKNOWN);
+    if (bits.length) out.push([n.CHECK ? 'warn' : 'calc', "조항 " + bits.join(" · ")]);
+  }
+  (x.hitFixes || []).forEach((f) => out.push(['', "픽스 " + f]));
+  (x.hitAirways || []).forEach((a) => out.push(['', "항공로 " + a]));
+  (x.hitPoints || []).forEach((p) => out.push(['', p]));
+  if (x.limits && x.limits.length) out.push(['', x.limits.slice(0, 3).join(" · ")]);
+  return out;
+}
 
-            <!-- Section 2: Full Raw NOTAM List with Interactive Shading & Korean Explanations -->
-            <section id="rawNotamWorkbench" class="bg-slate-900 border border-slate-800 rounded-2xl p-6 sm:p-10 shadow-2xl space-y-6">
-                
-                <!-- Section Header & Smart Shading Metrics -->
-                <div class="border-b border-slate-800 pb-6 space-y-4">
-                    <div class="flex flex-col sm:flex-row sm:items-center justify-between gap-3">
-                        <div class="flex items-center gap-3">
-                            <div class="p-2.5 bg-amber-500/10 border border-amber-500/30 rounded-xl text-amber-400">
-                                <i data-lucide="file-code-2" class="w-6 h-6"></i>
-                            </div>
-                            <div>
-                                <div class="flex items-center gap-2">
-                                    <h2 class="text-lg sm:text-xl font-black text-white tracking-wide">
-                                        📄 비행계획서 NOTAM 전수 원문 나열 & 한글 요약 해설
-                                    </h2>
-                                </div>
-                                <p class="text-xs text-slate-400 mt-0.5">
-                                    비행계획서 내 모든 NOTAM 원문을 그대로 표시하며, <strong>각 NOTAM별 간단한 한글 요약 해설 및 음영 이유</strong>가 함께 제공됩니다.
-                                </p>
-                            </div>
-                        </div>
+/* Clause-by-clause status for NOTAMs that state numbered conditions.
+   Every clause is listed - including the ones nothing could be computed for.
+   Dropping those would leave the pilot thinking the whole NOTAM was cleared. */
+const V = {
+  OK:      ['✅', '충족',      'v-ok'],
+  CHECK:   ['⚠',  '확인 필요',  'v-check'],
+  NA:      ['—',  '해당 없음',  'v-na'],
+  UNKNOWN: ['?',  '판정 불가',  'v-unk'],
+  MANUAL:  ['·',  '직접 확인',  'v-man'],
+  HEADER:  ['',   '',          'v-hdr']
+};
 
-                        <!-- Shading Counters -->
-                        <div class="flex items-center gap-2 font-mono text-xs shrink-0 flex-wrap">
-                            <span class="px-3 py-1.5 rounded-lg bg-slate-950 border border-slate-800 text-slate-300">
-                                전체 <strong id="cntTotal" class="text-amber-400">0</strong>건
-                            </span>
-                            <span class="px-3 py-1.5 rounded-lg bg-emerald-950/60 border border-emerald-800/60 text-emerald-300">
-                                🟢 유효(필수) <strong id="cntActive" class="text-emerald-400">0</strong>건
-                            </span>
-                            <span class="px-3 py-1.5 rounded-lg bg-slate-800/80 border border-slate-700 text-slate-400">
-                                ⚪ 음영 <strong id="cntShaded" class="text-slate-200">0</strong>건
-                            </span>
-                        </div>
-                    </div>
+function conditionTable(it) {
+  const cs = it.xc && it.xc.conditions;
+  if (!cs || !cs.length) return '';
+  const n = cs.reduce((a, c) => { a[c.verdict] = (a[c.verdict] || 0) + 1; return a; }, {});
+  const head = ['OK', 'CHECK', 'UNKNOWN', 'NA', 'MANUAL']
+    .filter((k) => n[k]).map((k) => V[k][1] + ' ' + n[k]).join(' · ');
+  return '<div class="cond"><h4>비행계획 대조 · 조항별 <span>' + esc(head) + '</span></h4>' +
+    cs.map((c) => c.verdict === 'HEADER'
+      ? '<div class="cl hdr">' + esc(c.ref) + '. ' + esc(c.text.replace(/^\d+\.\s*/, '')) + '</div>'
+      : '<div class="cl ' + V[c.verdict][2] + '">' +
+          '<span class="ref">' + esc(c.ref) + '</span>' +
+          '<span class="vd">' + V[c.verdict][0] + ' ' + V[c.verdict][1] + '</span>' +
+          '<span class="ws">' + esc(c.why || '') + '</span>' +
+          '<span class="tx">' + esc(c.text) + '</span>' +
+        '</div>').join('') +
+    '<p class="foot">충족·확인 필요는 문서에 인쇄된 값으로 계산한 결과입니다. ' +
+    '판정 불가는 필요한 좌표나 수치가 이 문서에 없다는 뜻이며, ' +
+    '직접 확인은 기계 판정 규칙이 없는 문장입니다. 어느 쪽도 준수를 보증하지 않습니다.</p></div>';
+}
 
-                    <!-- Filter Controls & Quick Actions -->
-                    <div class="bg-slate-950 border border-slate-800 rounded-xl p-4 space-y-3">
-                        <div class="flex flex-col sm:flex-row items-center justify-between gap-3">
-                            <!-- Search Input -->
-                            <div class="relative w-full sm:w-80">
-                                <i data-lucide="search" class="w-4 h-4 text-slate-400 absolute left-3 top-1/2 -translate-y-1/2"></i>
-                                <input 
-                                    type="text" 
-                                    id="rawSearchInput" 
-                                    oninput="renderRawNotamList()" 
-                                    placeholder="원문 검색 (활주로, Fix, ID, 장비, 한글)..." 
-                                    class="w-full pl-9 pr-4 py-2 bg-slate-900 border border-slate-800 rounded-lg text-xs text-slate-100 placeholder-slate-500 focus:outline-none focus:border-amber-500/50"
-                                />
-                            </div>
+function firstLine(it) {
+  const m = it.raw.match(/E\)\s*([\s\S]{0,220})/);
+  return (m ? m[1] : it.raw).replace(/\s+/g, " ").trim();
+}
 
-                            <!-- View Filter & Quick Batch Buttons -->
-                            <div class="flex items-center gap-2 flex-wrap self-end sm:self-auto text-xs font-mono">
-                                <button id="btnViewMode" onclick="toggleShadedViewMode()" class="px-3 py-1.5 rounded-lg border border-slate-700 bg-slate-900 hover:bg-slate-800 text-slate-200 transition flex items-center gap-1.5">
-                                    <i data-lucide="eye" class="w-3.5 h-3.5 text-amber-400"></i>
-                                    <span id="txtViewMode">모든 원문 표시 (음영 포함)</span>
-                                </button>
-                                <button onclick="batchShadeCategories()" class="px-3 py-1.5 rounded-lg border border-amber-500/40 bg-amber-500/10 hover:bg-amber-500/20 text-amber-300 transition">
-                                    ↺ 수동 판정 초기화
-                                </button>
-                                <button onclick="resetAllShadingOverrides()" class="px-2.5 py-1.5 rounded-lg border border-slate-800 bg-slate-900 hover:bg-slate-800 text-slate-400 hover:text-slate-200 transition">
-                                    초기화
-                                </button>
-                            </div>
-                        </div>
+function card(it) {
+  const b = bucket(it), [lab, cls] = LABEL[b], cs = chips(it);
+  return '<details class="n" data-t="' + b + '"><summary><span class="rail"></span><span class="hdr">' +
+    '<span class="l1"><b>' + esc(it.station) + ' ' + esc(it.id.slice(it.station.length + 1)) + '</b>' +
+    '<span class="tag ' + cls + '">' + lab + '</span>' +
+    (b === "shade" && it.reasonBadge ? '<span class="tag t-shade">' + esc(it.reasonBadge) + '</span>' : '') +
+    '</span><span class="l2">' + esc(it.valid) + '</span>' +
+    '<span class="l3">' + esc(firstLine(it)) + '</span>' +
+    (cs.length ? '<span class="chips">' + cs.map(([k, t]) =>
+      '<span class="chip ' + k + '">' + esc(t) + '</span>').join('') + '</span>' : '') +
+    '</span></summary><div class="body">' +
+    conditionTable(it) +
+    (it.reasonDetail ? '<div class="why"><h4>' + esc(it.reasonBadge || '') + '</h4>' + esc(it.reasonDetail) + '</div>' : '') +
+    '<pre class="raw">' + esc(it.raw) + '</pre></div></details>';
+}
 
-                        <!-- Station Filter Tabs -->
-                        <div class="flex flex-wrap items-center gap-1.5 pt-2 border-t border-slate-800" id="rawStationTabs">
-                            <!-- Populated by JS -->
-                        </div>
+function keep(it) {
+  const b = bucket(it);
+  return filter === "all" ? true
+       : filter === "hot" ? (b === "crit" || b === "calc" || b === "rev")
+       : filter === "active" ? b !== "shade"
+       : b === "shade";
+}
 
-                        <!-- Reason Filter Pills -->
-                        <div class="flex flex-wrap items-center gap-1.5 pt-1" id="rawReasonPills">
-                            <button onclick="filterByReason('ALL')" class="pill-reason active px-2.5 py-1 rounded text-xs font-mono bg-amber-500/15 border border-amber-500/40 text-amber-300" data-reason="ALL">전체 원문</button>
-                            <button onclick="filterByReason('ACTIVE_ONLY')" class="pill-reason px-2.5 py-1 rounded text-xs font-mono bg-slate-900 border border-slate-800 text-emerald-400 hover:border-emerald-700" data-reason="ACTIVE_ONLY">🟢 유효 운항 NOTAM만</button>
-                            <button onclick="filterByReason('LIGHTING')" class="pill-reason px-2.5 py-1 rounded text-xs font-mono bg-slate-900 border border-slate-800 text-slate-400 hover:text-slate-200" data-reason="LIGHTING">💡 등화 (Lighting)</button>
-                            <button onclick="filterByReason('MARKING')" class="pill-reason px-2.5 py-1 rounded text-xs font-mono bg-slate-900 border border-slate-800 text-slate-400 hover:text-slate-200" data-reason="MARKING">🎨 표지·도색 (Marking)</button>
-                            <button onclick="filterByReason('NON_FLIGHT_TIME')" class="pill-reason px-2.5 py-1 rounded text-xs font-mono bg-slate-900 border border-slate-800 text-slate-400 hover:text-slate-200" data-reason="NON_FLIGHT_TIME">⏰ 비운항시간 외</button>
-                            <button onclick="filterByReason('NON_FLIGHT_ROUTE')" class="pill-reason px-2.5 py-1 rounded text-xs font-mono bg-slate-900 border border-slate-800 text-slate-400 hover:text-slate-200" data-reason="NON_FLIGHT_ROUTE">🛣️ 비운항항로/VFR</button>
-                            <button onclick="filterByReason('O\TACLE_LOW')" class="pill-reason px-2.5 py-1 rounded text-xs font-mono bg-slate-900 border border-slate-800 text-slate-400 hover:text-slate-200" data-reason="O\TACLE_LOW">🏗️ 저고도 크레인/장애물</button>
-                        </div>
-                    </div>
-                </div>
+/* Runway first: it is what closes an airport. Then the rest of the ground,
+   then the air. Anything the document labelled with a heading we do not know
+   still appears - at the end, never dropped. */
+const CAT_ORDER = ["활주로", "유도로", "계류장", "출발·접근", "공항 일반",
+                   "항법시설", "위성항법", "통신", "항공로", "공역", "장애물",
+                   "회사 지시", "기타"];
 
-                <!-- Raw NOTAM Stack Container -->
-                <div id="rawNotamContainer" class="space-y-3">
-                    <!-- Dynamically rendered raw NOTAM items with detailed reasons & Korean explanations -->
-                </div>
+function byCategory(items) {
+  const map = new Map();
+  items.forEach((it) => {
+    const k = it.categoryKo || "분류 없음";
+    if (!map.has(k)) map.set(k, []);
+    map.get(k).push(it);
+  });
+  const known = CAT_ORDER.filter((k) => map.has(k));
+  const rest = [...map.keys()].filter((k) => CAT_ORDER.indexOf(k) < 0).sort();
+  return known.concat(rest).map((k) => [k, map.get(k)]);
+}
 
-            </section>
+/* Inside a category, file items under the thing they are about - the runway,
+   the taxiway. "RUNWAY" as one heap puts the 04R closure and the 04R lead-off
+   light in different places while a pilot departing 04R needs both, and mixes
+   in 13L which they do not. Only worth doing when the category really holds
+   more than one subject; otherwise the sub-headings are just noise. */
+/* How many items a subject needs before it earns its own heading.
+   A runway keeps its heading at one item - each runway is a distinct thing a
+   pilot looks up, and a single closure is exactly what they are looking for.
+   Taxiways are different: 51 items over 35 taxiways is mostly one-line groups,
+   and the headings then outnumber what they organise. */
+const SUBGROUP_MIN = { '유도로': 3 };
+const OTHERS = '그 밖에';
 
-        </div>
+function bySubject(items, category) {
+  const map = new Map();
+  items.forEach((it) => {
+    const k = it.subjectLabel || '지정 없음';
+    if (!map.has(k)) map.set(k, []);
+    map.get(k).push(it);
+  });
 
-    </main>
+  const min = SUBGROUP_MIN[category] || 1;
+  if (min > 1) {
+    const small = [...map.keys()].filter((k) => k !== '지정 없음' && map.get(k).length < min);
+    if (small.length) {
+      const rest = [];
+      small.forEach((k) => { rest.push(...map.get(k)); map.delete(k); });
+      const tail = (map.get('지정 없음') || []).concat(rest);
+      map.delete('지정 없음');
+      map.set(OTHERS, tail);
+    }
+  }
 
-    <!-- Complete Inlined Self-Contained Engine Script -->
-    <script>
-        // Global State
-        let allParsedNotams = [];
-        let lastDocText = "";   // source text of whatever is on screen
-        let userShadingMap = {}; // notamId -> boolean (true: shaded, false: active)
-        let currentStationTab = 'ALL';
-        let currentReasonFilter = 'ALL';
-        let viewOnlyActive = false;
+  const tailKeys = [OTHERS, '지정 없음'].filter((k) => map.has(k));
+  const named = [...map.keys()].filter((k) => tailKeys.indexOf(k) < 0).sort();
+  if (named.length < 2) return null;
+  return named.concat(tailKeys).map((k) => [k, map.get(k)]);
+}
 
+function subBlock(name, items) {
+  const shown = items.filter(keep);
+  if (!shown.length) return '';
+  return '<div class="sub2"><div class="sub2h">' + esc(name) +
+    '<span class="cnt">' + shown.length + '</span></div>' +
+    shown.map(card).join('') + '</div>';
+}
 
-        /**
-         * Synthesizes the entire flight package text into a structured Executive Briefing Object.
-         */
-        function buildExecutiveBriefing(fullText, filename = "Flight_Document.pdf") {
-            const upper = fullText.toUpperCase();
+function catBlock(name, items) {
+  const shown = items.filter(keep);
+  if (!shown.length) return '';
+  const srcs = [...new Set(items.map((i) => i.categoryLabel).filter(Boolean))];
+  const subs = bySubject(items, name);
+  const inner = subs
+    ? subs.map(([k, v]) => subBlock(k, v)).join('')
+    : shown.map(card).join('');
+  return '<details class="cat" open><summary><span class="chev">&#9656;</span><span>' +
+    '<h3>' + esc(name) + '</h3>' +
+    (srcs.length ? '<div class="src">' + esc(srcs.join(" + ")) + '</div>' : '') +
+    '</span><span class="cnt">' + shown.length + ' / ' + items.length + '</span></summary>' +
+    '<div class="list">' + inner + '</div></details>';
+}
 
-            // 1. Flight Metadata Detection
-            const callsignM = upper.match(/\b(AAR\d{3,4}|KAL\d{3,4}|OZ\d{3,4}|KE\d{3,4})\b/);
-            const callsign = callsignM ? callsignM[1] : "AAR223";
-            const flightNo = callsign.startsWith("AAR") ? `OZ${callsign.slice(3)}` : callsign;
+function section(title, sub, items, opts) {
+  opts = opts || {};
+  const shown = items.filter(keep);
+  const counts = items.reduce((a, it) => { const b = bucket(it); a[b] = (a[b] || 0) + 1; return a; }, {});
+  const badge = ["crit", "calc", "rev", "appl", "shade"]
+    .filter((k) => counts[k]).map((k) => LABEL[k][0] + " " + counts[k]).join(" · ");
+  const inner = opts.flat
+    ? '<div class="list">' + (shown.length ? shown.map(card).join('') : '<div class="empty">해당 항목 없음</div>') + '</div>'
+    : (byCategory(items).map(([k, v]) => catBlock(k, v)).join('') ||
+       '<div class="empty">이 필터에 해당하는 항목이 없습니다</div>');
+  return '<details class="pkg' + (opts.excluded ? ' excl' : '') + '"' + (opts.open ? ' open' : '') + '>' +
+    '<summary><span class="chev">&#9656;</span><span><h2>' + esc(title) + '</h2>' +
+    '<div class="sub">' + esc(sub) + (badge ? ' · ' + badge : '') + '</div></span>' +
+    '<span class="cnt">' + shown.length + ' / ' + items.length + '</span></summary>' + inner + '</details>';
+}
 
-            const regM = upper.match(/\b(HL\d{4})\b/);
-            const reg = regM ? regM[1] : (callsign === "AAR202" ? "HL7635" : "HL7640");
+/* ---- FIR-by-FIR summary, the first thing on the page ----------------
+   Counts and computed values only. There is deliberately no closing
+   "all clear" line: what this can honestly end with is how many items it
+   worked out and how many the pilot still has to read. */
+/* Airport ident -> the city a pilot says out loud, when the engine's FIR table
+   happens to know it. Unknown idents stay as idents; a wrong city name in a
+   briefing is worse than a code. */
+const firName2 = (icao) => {
+  const n = (typeof FIR_NAMES !== 'undefined') && FIR_NAMES[icao];
+  return n ? n[0] : null;
+};
 
-            const typeM = upper.match(/\b(388|A380|A388|A350|A359|B777|B77W|B787|B789|A330|A333)\b/);
-            const acftType = typeM ? (typeM[1] === "388" ? "A380-800" : typeM[1]) : "A380-800";
+const utc = (ms) => {
+  if (ms === null || ms === undefined) return null;
+  const d = new Date(ms);
+  return String(d.getUTCHours()).padStart(2, '0') + String(d.getUTCMinutes()).padStart(2, '0') + 'Z';
+};
 
-            // Dep / Dest / Altn - read from the filed flight plan, never guessed.
-            //
-            // This used to test `upper.includes("RKSI") && upper.includes("KLAX")`
-            // first. The JFK->ICN package mentions KLAX ten times (alternates, ETP
-            // lists), so that branch won every time and the whole briefing - route,
-            // FIRs, alternate, critical NOTAMs - came out as the Los Angeles flight.
-            // Field 13 and field 16 of the ICAO flight plan say it exactly; use them.
-            const fpl = parseIcaoFpl(fullText);
-            let dep = fpl ? fpl.dep : null;
-            let dest = fpl ? fpl.dest : null;
-            let altn = fpl && fpl.altns.length ? fpl.altns.join(" / ") : null;
-            const routeSource = fpl ? "FPL" : "UNKNOWN";
+const dayZ = (ms) => {
+  if (ms === null || ms === undefined) return '—';
+  const d = new Date(ms);
+  return d.getUTCDate() + '일 ' + String(d.getUTCHours()).padStart(2, '0') +
+         String(d.getUTCMinutes()).padStart(2, '0') + 'Z';
+};
 
-            const isJfkToIcn = (dep === "KJFK" && dest === "RKSI");
-            const isIcnToLax = (dep === "RKSI" && dest === "KLAX");
-            // The hand-written per-flight sections below only describe these two
-            // legs. Anything else gets the parsed NOTAMs and nothing invented.
-            const hasFlightProfile = isJfkToIcn || isIcnToLax;
+/* A time span. The day is printed once when both ends fall on it - a pilot
+   reading "29일 1200Z–29일 2200Z" has to check twice that it really is one day. */
+const rangeZ = (a, b) => {
+  const A = dayZ(a), B = dayZ(b);
+  const [dA, tA] = A.split(' '), [dB, tB] = B.split(' ');
+  return dA === dB ? dA + ' ' + tA + '–' + tB : A + '–' + B;
+};
 
-            const fteM = upper.match(/F\/T\s*(\d{1,2}\.\d{2})/);
-            let flightTime = null;
-            if (fteM) {
-                flightTime = `${fteM[1].replace('.', '시간 ')}분`;
-            } else if (fpl && fpl.eet && /^\d{4}$/.test(fpl.eet)) {
-                flightTime = `${parseInt(fpl.eet.slice(0, 2), 10)}시간 ${fpl.eet.slice(2)}분`;
-            }
+/* Minutes, said the way a crew says them. Under an hour stays in minutes. */
+const mins = (m) => {
+  const n = Math.abs(Math.round(m));
+  if (n < 60) return n + '분';
+  const h = Math.floor(n / 60), r = n % 60;
+  return r ? h + '시간 ' + r + '분' : h + '시간';
+};
 
-            // Route extraction
-            const fplM = upper.match(/\(FPL-[^\)]+\)/);
-            let routeText = "";
-            if (fplM) {
-                routeText = fplM[0].replace(/\r?\n/g, ' ');
-            } else {
-                const rMatch = upper.match(/(KJFK\.\.[^\n\r]+|RKSI\.\.[^\n\r]+)/);
-                routeText = rMatch ? rMatch[0] : (!hasFlightProfile ? "" : isJfkToIcn ? "KJFK..GREKI..JUDDS..CAM..EPTUL..N50W075..N55W078..N57W080..N61W090..N63W100..N65W110..N66W120..N67W130..GOATS..BTT..N66W160..N63W170..MUCLA R338 NATES R220 NODAN R217 ASTER Y514 SDE Y512 GTC L512 TENAS Y437 KAE Y697 KARBU..RKSI" : "RKSI DCT EGOBA Y697 LANAT Y51 SAMON Y142 GTC Y512 OATIS R580 OPHET R580 OPAKE A342 AMOND 55N170W 54N160W 53N150W 51N140W 45N130W DCT NATTE DCT OAK DCT BURGL IRNMN2 KLAX");
-            }
+/* A conditional route in full: which airway, which leg of OUR route sits on it,
+   when it opens, when we are on it, and how much room is left at each end.
+   "여유 523분" on its own hid the tighter of the two margins - AAR224 enters
+   39 minutes after L512 opens and leaves 523 minutes before it shuts, and it
+   is the 39 that a delay eats into. */
+function cdrDetail(c) {
+  const legs = (c.legs || []).map((l) => l.from + '→' + l.to).join(', ');
+  const v = c.verdict === 'INSIDE' ? '개방시간 내'
+          : c.verdict === 'OUTSIDE' ? '개방시간 밖'
+          : c.verdict === 'PARTIAL' ? '일부만 개방시간 내' : '통과 시각을 몰라 판정 불가';
+  const p = ['항공로 ' + c.awy + (legs ? ' · 우리 항로 구간 ' + legs : '')];
+  p.push('개방 ' + rangeZ(c.open.from, c.open.to));
+  if (c.enter !== null && c.enter !== undefined) {
+    p.push('통과 예정 ' + rangeZ(c.enter, c.exit));
+    p.push(v);
+    const inM = Math.round((c.enter - c.open.from) / 60000);
+    const outM = Math.round((c.open.to - c.exit) / 60000);
+    p.push((inM >= 0 ? '개방 ' + mins(inM) + ' 후 진입' : '개방 ' + mins(inM) + ' 전 진입') + ', ' +
+           (outM >= 0 ? '종료 ' + mins(outM) + ' 전 이탈' : '종료 ' + mins(outM) + ' 후 이탈'));
+  } else {
+    p.push(v);
+  }
+  if (c.alt) p.push('고도 조건 ' + c.alt);
+  return p.join(' · ');
+}
 
-            // Refile & ETP & FIRs - only meaningful for a leg we recognise.
-            const UNKNOWN = "문서에서 확인되지 않음";
-            const refileStr = !hasFlightProfile ? UNKNOWN : isJfkToIcn ? "도쿄 하네다 (RJTT), 오사카 간사이 (RJBB)" : "해당 없음";
-            const etpStr = !hasFlightProfile ? UNKNOWN : isJfkToIcn ? "시카고 (KORD), 앵커리지 (PANC), 삿포로 (RJCC), 몬트리올 (CYUL), 에드먼턴 (CYEG) 등" : "삿포로 (RJCC), 콜드베이 (PACD), 샌프란시스코 (KSFO) 등";
-            const firStr = !hasFlightProfile ? UNKNOWN : isJfkToIcn 
-                ? "KZNY (뉴욕) ➔ KZBW (보스턴) ➔ CZUL (몬트리올) ➔ CZWG (위니펙) ➔ CZEG (에드먼턴) ➔ PAZA (앵커리지) ➔ RJJJ (후쿠오카) ➔ RKRR (인천)"
-                : "RKRR (인천) ➔ RJJJ (후쿠오카) ➔ PAZA (앵커리지) ➔ KZAK (오클랜드 해양) ➔ KZSE (시애틀) ➔ KZOA (오클랜드) ➔ KZLA (로스앤젤레스)";
+/* One line of evidence for an item, drawn from what the engine computed. */
+function evidenceLine(it) {
+  const x = it.xc, bits = [];
+  if (x.cdr) x.cdr.forEach((c) => bits.push(cdrDetail(c)));
+  if (x.dailyCheck) bits.push('일일창 ' + x.dailyCheck.spec + ' · 진입 ' +
+    String(Math.floor(x.dailyCheck.entry / 60)).padStart(2, '0') +
+    String(x.dailyCheck.entry % 60).padStart(2, '0') + 'Z · ' +
+    (x.dailyCheck.inWindow ? '창 안' : '창 밖'));
+  if (x.geo) bits.push((x.geo.lateralClear ? '이격 ' : '저촉 ') + Math.round(x.geo.minNm) + 'NM' +
+    (x.geo.vertClear === true ? ' · 고도 분리됨' : x.geo.vertClear === false ? ' · 고도 겹침' : ''));
+  ((x.zones && x.zones.banned) || []).forEach((z) => bits.push(
+    z.entered ? '금지공역 관통' : '금지공역 ' + Math.round(z.nearestNm) + 'NM'));
+  if (x.conditions) {
+    const n = x.conditions.reduce((a, c) => { a[c.verdict] = (a[c.verdict] || 0) + 1; return a; }, {});
+    const p = [];
+    if (n.OK) p.push('충족 ' + n.OK);
+    if (n.CHECK) p.push('확인 필요 ' + n.CHECK);
+    if (n.UNKNOWN) p.push('판정 불가 ' + n.UNKNOWN);
+    if (n.NA) p.push('해당 없음 ' + n.NA);
+    if (p.length) bits.push('조항 ' + p.join(' · '));
+  }
+  return bits.join('  ·  ');
+}
 
-            // 2. Build Critical NOTAMs with Raw Text (Flight Specific!)
-            // Stays empty for any leg these hand-written blocks do not cover.
-            const criticalNotams = [];
-            if (isJfkToIcn) {
-                criticalNotams.push({
-                    badge: "CRITICAL",
-                    title: "1. 출발지 (KJFK): 활주로 04R/22L 및 04L/22R 교차 활주로 동시 전면 폐쇄 (A7259/26, A7258/26)",
-                    period: "29AUG26 03:00 ~ 29AUG26 10:00Z (출발 시간대 포함)",
-                    content: "RWY 04R/22L 및 RWY 04L/22R 두 교차 활주로가 동시에 전면 폐쇄됩니다.",
-                    action: "출발 이륙 활주로가 RWY 31L 또는 13R로 전면 집중되어 심각한 지상 정체 및 이륙 대기 지연(Slot Delay)이 예상됩니다. 출항 전 최신 푸시백 및 이륙 활주로 배정 상태(31L Exp)를 확인하십시오.",
-                    raw: `29AUG26 03:00 - 29AUG26 10:00 KJFK A7259/26
-E) RWY 04R/22L CLSD
-COMMENT) CODE F A/C USING RWY
+/* When no distance, level or clock check applied, two things are still known
+   by computation: whether the station is one of ours, and whether the validity
+   overlaps the flight window. Saying "nothing was computed" and stopping throws
+   both away - and repeated under every runway closure it reads as noise. */
+/* Which page of the uploaded PDF this NOTAM is printed on. The layout index
+   already knows: every page carries the character range it covers, and every
+   NOTAM carries its own. Only available when a PDF was opened - the bundled
+   samples are text with no document behind them. */
+function pageOf(it) {
+  if (!LAYOUT || !(it.to > it.at)) return null;
+  for (const p of LAYOUT.pages) {
+    if (p.to > it.at && p.from < it.to) return p.page;
+  }
+  return null;
+}
 
-29AUG26 03:00 - 29AUG26 10:00 KJFK A7258/26
-E) RWY 04L/22R CLSD
-COMMENT) CODE F A/C USING RWY`
-                });
-                criticalNotams.push({
-                    badge: "WARNING",
-                    title: "2. 출발지 (KJFK): JFK VOR/DME 및 CRI VOR/DME 운용 중단 (A7174/26, A7252/26, A6967/26)",
-                    period: "발효 중 (U/S)",
-                    content: "공항 주 항법시설인 JFK VOR/DME 및 CRI VOR/DME가 운용 불능(U/S)입니다.",
-                    action: "Kennedy Five SID 이륙 시(Breezy Point / Canarsie Climb) RNAV/GPS 장비 탑재기만 출항 가능합니다. FMS Navigation 상태(High Accuracy/GPS Primary)를 필수 확인하십시오.",
-                    raw: `25AUG26 21:00 - 01SEP26 16:14 KJFK A7174/26
-E) SID JOHN F KENNEDY INTL, NEW YORK, NY. KENNEDY FIVE DEPARTURE...
-DEPARTURE PROCEDURE NA EXCEPT FOR ACFT EQUIPPED WITH SUITABLE RNAV SYSTEM WITH GPS, JFK VOR/DME OUT OF SERVICE.
+function knownWithoutGeometry(it) {
+  const x = it.xc, bits = [];
+  if (x.stationMatch) bits.push('우리 공항');
+  else if (x.firMatch) bits.push('우리가 통과하는 FIR');
+  if (x.timeState === 'OVERLAP') bits.push('비행 시간대에 유효');
+  else if (x.timeState === 'OUTSIDE') bits.push('비행 시간대 밖');
+  if (!bits.length) return '거리·고도·시각 판정에 쓸 수치가 원문에 없습니다 — 원문을 확인하십시오';
+  return bits.join(' · ') + ' — 그 밖의 영향은 원문을 확인하십시오';
+}
 
-28AUG26 15:10 - 25SEP26 15:10 KJFK A7252/26
-E) SID JOHN F KENNEDY INTL, NEW YORK, NY. KENNEDY FIVE DEPARTURE...
-TAKEOFF RUNWAYS 31L/R: BREEZY POINT CLIMB AND CANARSIE CLIMB NA EXCEPT FOR ACFT EQUIPPED WITH SUITABLE RNAV SYSTEM WITH GPS, CRI VOR/DME OUT OF SERVICE.`
-                });
-                criticalNotams.push({
-                    badge: "CAUTION",
-                    title: "3. 출발지 (KJFK): 이륙 활주로 31L/31R 시단 인근 다수의 대형 크레인 설치 (A6516/26, A6514/26, A6513/26)",
-                    period: "발효 중",
-                    content: "RWY 31L/31R 이륙 경로 4,000~5,000FT 지점에 최고 302FT MSL의 임시 기중기(Crane) 다수 설치.",
-                    action: "이륙 성능 계산(TODC/EFB) 시 장애물 데이터 반영 여부 및 엔진 고장 복행 시 상승 구배를 확인하십시오.",
-                    raw: `27JUL26 21:10 - 08MAR27 21:10 KJFK A6516/26
-E) ODP JOHN F KENNEDY INTL, NEW YORK, NY. TAKEOFF MINIMUMS AND (O\TACLE) DEPARTURE PROCEDURES AMDT 9A... ADD TAKEOFF O\TACLE NOTE:
-RWY 31R, TEMPORARY CRANE 4276FT FROM DER, 1540FT LEFT OF CENTERLINE, 125FT AGL/138FT MSL (2024-AEA-5111-NRA).`
-                });
-                criticalNotams.push({
-                    badge: "CRITICAL",
-                    title: "4. 회항지 제한: 몬트리올(CYUL) A380 착륙 전면 불가 (CYUL E4479/26, E4943/26)",
-                    period: "발효 중",
-                    content: "날개폭 213FT(65m) 초과 항공기 공항 이용 전면 금지(Code F 불가) 및 타사기 비상 회항 불가.",
-                    action: "캐나다 영공 비행 중 비상 상황 발생 시 CYUL을 회항 공항으로 선택할 수 없습니다 (인근 CYOW 또는 토론토 CYYZ 고려).",
-                    raw: `10JUL26 17:36 - 16SEP26 16:00 CYUL E4479/26
-E) AD NOT AVBL TO ACFT WITH WINGSPAN GREATER THAN 213FT`
-                });
-                criticalNotams.push({
-                    badge: "CRITICAL",
-                    title: "5. 항로 공역: 캄차카 반도 화산재 분출 경보 (PAZA A2428/26, A2278/26)",
-                    period: "발효 중 (Color Code ORANGE, SFC ~ FL250)",
-                    content: "러시아 캄차카 반도 클류체프스코이 화산 분출로 인한 화산재 위험 고도: SFC ~ FL250.",
-                    action: "알래스카/캄차카 통과 항로 비행 시 화산재 SIGMET 및 CWA를 지속 청취하고 야간 비행 중 화산재 구름 진입을 절대 회피하십시오.",
-                    raw: `17AUG26 00:43 - 17AUG27 00:30 PAZA A2428/26
-E) VOLCANIC ACTIVITY ADVISORY FOR KLYUCHEVSKOY VOLCANO / 560300N1603900E / KAMCHATKAN PENINSULA, RUSSIA. COLOR CODE ORANGE. F) SFC G) FL250`
-                });
-            } else if (isIcnToLax) {
-                // ICN-LAX (AAR202 / OZ202)
-                criticalNotams.push({
-                    badge: "CRITICAL",
-                    title: "1. 도착지 (KLAX): 활주로 07L/25R 일시 전면 폐쇄 (KLAX A4733/26)",
-                    period: "29AUG26 07:30 ~ 29AUG26 13:30Z",
-                    content: "북측 주 활주로 RWY 07L/25R 포장 보수 공사로 인해 전면 폐쇄됩니다.",
-                    action: "도착 시간대(10:38Z) 폐쇄 적용됨. 남측 07R/25L, 06R/24L 또는 북측 06L/24R 착륙 배정 확인. 접근 브리핑 시 활주로 변경 대비.",
-                    raw: `29AUG26 07:30 - 29AUG26 13:30 KLAX A4733/26
-E) RWY 07L/25R CLSD DUE TO PAVEMENT REHABILITATION WORK`
-                });
-                criticalNotams.push({
-                    badge: "WARNING",
-                    title: "2. 도착지 (KLAX): [A380 기종 한정] 유도로 B 날개폭 제한 고시 (KLAX A4372/26)",
-                    period: "매주 목/금/토/화/수 0730-1330Z",
-                    content: "TWY B (TWY B3 ~ TWY B1 구간) 날개폭 118FT(36m) 초과 항공기 지상 활주 전면 금지.",
-                    action: "본 기종(A380-800)은 날개폭이 261.8FT(79.8m)로 해당 구간 통과가 불가능합니다. 착륙 후 관제사에게 A380 인가 Taxiway(TWY C 등) 우회 경로를 필히 요청하십시오.",
-                    raw: `06AUG26 07:30 - 01SEP26 13:30 KLAX A4372/26
-D) THU FRI SAT TUE WED 0730-1330
-E) TWY B BTN TWY B3 AND TWY B1 CLSD TO ACFT WINGSPAN MORE THAN 118FT`
-                });
-                criticalNotams.push({
-                    badge: "CRITICAL",
-                    title: "3. 항로 공역: 캄차카 반도 화산재 분출 경보 (PAZA A2428/26, A2278/26)",
-                    period: "발효 중 (Color Code ORANGE, SFC ~ FL250)",
-                    content: "러시아 캄차카 반도 클류체프스코이 & 셰벨루치 화산 분출로 인한 화산재 위험 고도: SFC ~ FL250.",
-                    action: "북태평양 항로 통과 시 최신 화산재 SIGMET 및 CWA를 모니터링하고 순항고도(FL350~FL390) 유지로 화산재 구름 진입을 회피하십시오.",
-                    raw: `17AUG26 00:43 - 17AUG27 00:30 PAZA A2428/26
-E) VOLCANIC ACTIVITY ADVISORY FOR KLYUCHEVSKOY VOLCANO / 560300N1603900E / KAMCHATKAN PENINSULA, RUSSIA. COLOR CODE ORANGE. F) SFC G) FL250`
-                });
-                criticalNotams.push({
-                    badge: "WARNING",
-                    title: "4. 출발지 (RKSI): 인천 FIR 군 훈련에 따른 GPS 신호 불량 경고 (RKSI Z0511/24, Z0555/26)",
-                    period: "발효 중",
-                    content: "인천/서울 인근 공역에서 군 훈련으로 인한 GPS 신호 간헐적 유실 및 Nuisance GPWS/Terrain 경보 발생 보고.",
-                    action: "GPS 신호 이상 발생 시 즉시 관제탑/접근관제소에 무선 보고하고, 재래식 항법(VOR/DME) 크로스체크 유지.",
-                    raw: `30MAY24 01:15 - UFN RKSI Z0511/24
-E) CAUTIONARY INFO FOR ACFT OPERATING IN INCHEON FIR : PILOTS HAVE REPORTED THAT GPS SIGNALS ARE UNRELIABLE OR LOST INTERMITTENTLY IN INCHEON FIR(AROUND INCHEON AND SEOUL AREA).`
-                });
-                criticalNotams.push({
-                    badge: "CAUTION",
-                    title: "5. 교체공항 (KONT): ILS 26R 정밀접근 CAT II/III 불가 및 ALS 결함 (KONT A1387/26, A1388/26)",
-                    period: "발효 중",
-                    content: "교체공항 온타리오(KONT) RWY 26R ILS CAT II/III 운용 불가 및 ALS U/S.",
-                    action: "회항 시 정밀접근 CAT I 최저치(DA 200ft / RVR 2400) 및 기상 시정 요건을 충족하는지 사전 확인하십시오.",
-                    raw: `25JUN26 07:34 - 30DEC26 23:59 KONT A1387/26
-E) NAV ILS RWY 26R CAT II/III NA
+/* ==================================================================
+ * 요약 뷰 - the briefing on its own page.
+ *
+ * Same facts as the FIR block in the list, laid out as a report: numbered
+ * airspaces, a sentence about each, then the items as 내용 / 운항 영향.
+ * Nothing here is asserted that was not computed, and there is no closing
+ * "all clear" line - see the absolute rules in CLAUDE.md.
+ * ================================================================== */
 
-25JUN26 07:41 - 30DEC26 23:59 KONT A1388/26
-E) RWY 26R ALS U/S`
-                });
-            }
+/* A short heading for one NOTAM. The Korean explanation is a sentence; its
+   first clause reads as a title. Nothing is invented - when the explanation is
+   the generic fallback, the category name is used instead. */
+function itemTitle(it) {
+  const ko = String(it.koreanExplanation || '');
+  const generic = /원문 세부 사항 참조|원문을 확인/.test(ko) || ko.length < 12;
+  if (!generic) {
+    const cut = ko.search(/[(.]/);
+    const head = (cut > 8 ? ko.slice(0, cut) : ko).trim().replace(/[.,]$/, '');
+    if (head.length >= 6) return head;
+  }
+  // No Korean summary for this type. The document's own opening clause makes a
+  // better heading than the bare category name ("공역") - and quoting is not
+  // inventing. It repeats the first words of 내용 below, which is a fair price
+  // for a line a pilot can scan.
+  // Cut at a colon, a dash, or the start of a numbered list - those open the
+  // body. Not at any full stop: "MULTIPLE U.S. MIL ACT" becomes "MULTIPLE U.S".
+  let head = firstLine(it).split(/\s*:\s|\s-\s|\s\d+\.\s/)[0].trim();
+  if (head.length > 58) head = head.slice(0, 58).replace(/\s+\S*$/, '') + '…';
+  if (head.length >= 8) return head;
+  return [it.categoryKo, it.subjectLabel].filter(Boolean).join(' · ') || it.station + ' 고시';
+}
 
-            // 3. Point-by-Point Route Compliance with Raw Text Quotes (Flight Specific!)
-            const compliancePoints = [];
-            if (isJfkToIcn) {
-                compliancePoints.push(
-                    {
-                        no: 1,
-                        title: "앵커리지 FIR 북부 공역 진입 및 경로 제한 준수 (PAZA A0176/26)",
-                        rule: "YUKON 1-5, DELTA, FOX 군 공역 활성화(1500-0600Z) 시, 북위 62도 이북에서 앵커리지 FIR로 진입하는 모든 항공기는 반드시 (A) ON OR N OF GOATS DCT BTT 또는 (B) ORT J124 GKN 경로로만 비행해야 함. (FIORD, CHAPO, FANES, GOATS DCT FYU 경로는 사용 금지)",
-                        filed: "...N67W130..GOATS..BTT..N66W160...",
-                        status: "COMPLIANT",
-                        verdict: "✅ 완전 일치 및 준수 (COMPLIANT)",
-                        desc: "의무 지정 경로인 GOATS DCT BTT를 정확하게 비행계획에 반영하여 군 공역 제한사항을 100% 준수합니다.",
-                        raw: `19MAR26 15:00 - 31OCT26 06:00 PAZA A0176/26
-E) YUKON 1-5, DELTA AND FOX ATC ASSIGNED AIRSPACE WILL NORMALLY BE ACT MON-FRI BTN THE HOURS OF 1500-0600. FLTS ENTERING ANCHORAGE FIR N OF 620000N1410000W MUST BE ESTABLISHED EITHER: (A) ON OR N OF GOATS DCT BTT (B) ON OR S OF ORT J124 GKN DTOUR`
-                    },
-                    {
-                        no: 2,
-                        title: "앵커리지 UPR(사용자 선호 항로) 서향 합류 규정 준수 (PAZA A2472/26)",
-                        rule: "Item 2.A (CZEG ➔ PAZA 진입점): TAYTA, GOATS, FIORD, CHAPO, TOVAD 등 지정 Fix 중 하나 경유 의무.<br>Item 3.A (PAZA ➔ RJJJ 서향 진출 규정): 서향 항공기는 웨이포인트 NIKLL 또는 그 동쪽(East)에서 항로 R220에 합류(Join)해야 함.",
-                        filed: "CZEG➔PAZA 진입: GOATS 경유 | PAZA➔RJJJ 진출: NATES (동경 E171°58')에서 R220 조인",
-                        status: "COMPLIANT",
-                        verdict: "✅ 완전 일치 및 준수 (COMPLIANT)",
-                        desc: "NATES는 NIKLL(동경 E169°20')보다 동쪽(East)에 위치하므로, NOTAM 규정(Join R220 over or East of NIKLL)을 완벽하게 만족합니다.",
-                        raw: `21AUG26 23:21 - 30NOV26 23:59 PAZA A2472/26
-E) USER PREFERRED ROUTE FLIGHT PLANNING GUIDELINES 2. USER PREFERRED ROUTE ENTERY/EXIT BTN CZEG, CZVR OR KZAK FIR: A. CZEG FIR: BTN TAYTA AND DEEJA MUST FLT PLAN OVER ONE OF THE FOLLOWING FIXES: GOATS... 3. WB USER PREFERRED ROUTE TO RJJJ FIR: A. JOIN R220 OVER OR E OF WAYPOINT NIKLL`
-                    },
-                    {
-                        no: 3,
-                        title: "일본 후쿠오카 FIR 조건부 항로(CDR) 유효 시간 준수 (RJJJ Q2053/26)",
-                        rule: "항로 L512 구간은 조건부 항로(CDR)로서 260829 1200Z ~ 2200Z 시간대에만 비행 가능 (MEA 이상).",
-                        filed: "항로상 GTC L512 TENAS 구간 비행 | OFP상 GTC ETO 13:19Z, TENAS ETO 14:10Z",
-                        status: "COMPLIANT",
-                        verdict: "✅ 완전 일치 및 준수 (COMPLIANT)",
-                        desc: "비행 통과 시간대(13:19Z~14:10Z)가 L512 개방 시간(12:00Z~22:00Z) 범위 내에 정확히 위치하여 정상 비행 가능합니다.",
-                        raw: `28AUG26 22:00 - 29AUG26 22:00 RJJJ Q2053/26
-E) CDR ARE ESTABLISHED AS FLW, RTE PERIOD MNM APPLICABLE ALT 1) L512 2608291200/2608292200 MEA`
-                    },
-                    {
-                        no: 4,
-                        title: "캄차카 반도 화산재 위험 고도 완전 회피 (PAZA A2428/26, A2278/26)",
-                        rule: "러시아 캄차카 반도 클류체프스코이 & 셰벨루치 화산 분출로 인한 화산재 위험 고도: SFC ~ FL250 (ORANGE 경보).",
-                        filed: "캄차카 반도 인접 통과 구간 계획 순항 고도: FL380 ➔ FL400",
-                        status: "COMPLIANT",
-                        verdict: "✅ 안전 고도 확보 (COMPLIANT)",
-                        desc: "화산재 위험 상한선(FL250)보다 13,000~15,000FT 이상 상공으로 비행하여 안전하게 통과합니다.",
-                        raw: `17AUG26 00:43 - 17AUG27 00:30 PAZA A2428/26
-E) VOLCANIC ACTIVITY ADVISORY FOR KLYUCHEVSKOY VOLCANO / 560300N1603900E / KAMCHATKAN PENINSULA, RUSSIA. COLOR CODE ORANGE. F) SFC G) FL250`
-                    },
-                    {
-                        no: 5,
-                        title: "뉴욕 JFK 출항 VOR 결함에 따른 RNAV 장비 준수 (KZNY A0695/26, A7174/26)",
-                        rule: "CRI VOR/DME 및 JFK VOR/DME 운용 중단으로 Kennedy Five SID 출항 시 RNAV/GPS 탑재 필수.",
-                        filed: "항공기 장비: A388 / SDE1E2E3FGHIJ1J2J3J4J5M1P2RWXYZ/LB1D1 (PBN/A1B1C1D1L1O1S2, RNP 1 / RNAV 1 인증 완비)",
-                        status: "COMPLIANT",
-                        verdict: "✅ 규정 준수 (COMPLIANT)",
-                        desc: "비행계획에 RNP 1 및 RNAV 1 인증이 완비되어 있어 VOR 결함과 무관하게 표준 계기출발을 정상 수행합니다.",
-                        raw: `25AUG26 21:00 - 01SEP26 16:14 KJFK A7174/26
-E) SID JOHN F KENNEDY INTL, NEW YORK, NY. KENNEDY FIVE DEPARTURE...
-DEPARTURE PROCEDURE NA EXCEPT FOR ACFT EQUIPPED WITH SUITABLE RNAV SYSTEM WITH GPS, JFK VOR/DME OUT OF SERVICE.`
-                    },
-                    {
-                        no: 6,
-                        title: "인천 FIR 진입 및 비행금지구역 회피 (RKRR D1768/26, Z0632/26)",
-                        rule: "서울 중심부(373523N 1265832E) 반경 2NM 임시 비행금지구역 설정 (D1768/26, SFC~UNL).",
-                        filed: "...TENAS Y437 KAE Y697 KARBU..RKSI",
-                        status: "COMPLIANT",
-                        verdict: "✅ 규정 준수 (COMPLIANT)",
-                        desc: "금지구역을 우회하여 동남측 KARBU 픽스를 통해 인천공항 표준 계기접근 절차로 정상 진입합니다.",
-                        raw: `28AUG26 00:00 - 30AUG26 23:59 RKRR D1768/26
-E) TEMPORARY PROHIBITED AREA ESTABLISHED RADIUS 2NM CENTERED ON 373523N1265832E. F) SFC G) UNL`
-                    }
-                );
-            } else if (isIcnToLax) {
-                // ICN-LAX (AAR202 / OZ202)
-                compliancePoints.push(
-                    {
-                        no: 1,
-                        title: "도착지 KLAX 북측 활주로 07L/25R 폐쇄에 따른 착륙 계획 준수 (KLAX A4733/26)",
-                        rule: "KLAX 북측 주 활주로 RWY 07L/25R이 포장 공사로 전면 폐쇄됨 (29AUG26 07:30 ~ 13:30Z).",
-                        filed: "KLAX 도착 예정 10:38Z (폐쇄 시간대 포함) | 남측 활주로(25L/24R) 또는 06L/24R 착륙 배정 반영",
-                        status: "COMPLIANT",
-                        verdict: "✅ 완전 일치 및 준수 (COMPLIANT)",
-                        desc: "비행계획 도착 시각이 폐쇄 시간대에 해당하므로 남측 복합 활주로(25L) 표준 계기접근 및 관제사의 활주로 변경(Sidestep) 지시 대비를 완료하였습니다.",
-                        raw: `29AUG26 07:30 - 29AUG26 13:30 KLAX A4733/26
-E) RWY 07L/25R CLSD DUE TO PAVEMENT REHABILITATION WORK`
-                    },
-                    {
-                        no: 2,
-                        title: "[A380 기종 한정] KLAX 유도로 B 날개폭 제한(118FT) 완전 회피 (KLAX A4372/26)",
-                        rule: "매주 목/금/토/화/수 0730-1330Z TWY B (B3 ~ B1 구간) 날개폭 118FT(36m) 초과 항공기 통행 금지.",
-                        filed: "운항 기종: A380-800 (HL7635, 날개폭 261.8FT / 79.8m) | 착륙 후 TWY B 진입 배제 및 TWY C 우회 경로 계획",
-                        status: "COMPLIANT",
-                        verdict: "✅ 완전 일치 및 준수 (COMPLIANT)",
-                        desc: "A380은 날개폭 제한(118ft)을 초과하므로 해당 유도로(TWY B) 진입을 철저히 배제하고 관제탑 인가 Code F Taxiway로 안전 지상 활주합니다.",
-                        raw: `06AUG26 07:30 - 01SEP26 13:30 KLAX A4372/26
-D) THU FRI SAT TUE WED 0730-1330
-E) TWY B BTN TWY B3 AND TWY B1 CLSD TO ACFT WINGSPAN MORE THAN 118FT`
-                    },
-                    {
-                        no: 3,
-                        title: "북태평양 NOPAC(R580) 및 대양 UPR 동향(Eastbound) 대양 항로 준수 (PAZA A2472/26, RJJJ Q2056/26)",
-                        rule: "대양 UPR 비행 시 반대 방향(서향) PACOTS/NOPAC 교통류와 수평 분리(Lateral Separation) 유지 의무 (PAZA A2472/26 Item 1).",
-                        filed: "...OATIS R580 OPHET R580 OPAKE A342 AMOND DCT 55N170W 54N160W 53N150W 51N140W 45N130W DCT NATTE...",
-                        status: "COMPLIANT",
-                        verdict: "✅ 완전 일치 및 준수 (COMPLIANT)",
-                        desc: "NOPAC 공인 동향 항로(R580)와 북태평양 대양 고고도 직항 분리 경로(55N170W..45N130W)를 계획하여 서향 대양 흐름과 완벽히 수평 분리됩니다.",
-                        raw: `21AUG26 23:21 - 30NOV26 23:59 PAZA A2472/26
-E) USER PREFERRED ROUTE FLIGHT PLANNING GUIDELINES 1. USER PREFERRED ROUTE ACFT WILL HAVE THE SAME PRIORITY FOR ALT ASSIGNMENT AS ACFT ON AN OPTIONAL PACOTS OR NOPAC TRACK.`
-                    },
-                    {
-                        no: 4,
-                        title: "캄차카 반도 화산재 위험 고도 완전 회피 (PAZA A2428/26, A2278/26)",
-                        rule: "러시아 캄차카 반도 클류체프스코이 & 셰벨루치 화산 분출로 인한 화산재 위험 고도: SFC ~ FL250 (ORANGE 경보).",
-                        filed: "캄차카 남측 인접 구간 계획 순항 고도: FL350 ➔ FL390 (Step Climb)",
-                        status: "COMPLIANT",
-                        verdict: "✅ 안전 고도 확보 (COMPLIANT)",
-                        desc: "화산재 위험 상한선(FL250)보다 10,000~14,000FT 이상 상공으로 비행하여 안전하게 통과합니다.",
-                        raw: `17AUG26 00:43 - 17AUG27 00:30 PAZA A2428/26
-E) VOLCANIC ACTIVITY ADVISORY FOR KLYUCHEVSKOY VOLCANO / 560300N1603900E / KAMCHATKAN PENINSULA, RUSSIA. COLOR CODE ORANGE. F) SFC G) FL250`
-                    },
-                    {
-                        no: 5,
-                        title: "출발지 인천공항(RKSI) 출항 및 상승 중 GPS 간섭 주의 (RKSI Z0511/24, COAD05/26)",
-                        rule: "인천 FIR 내 군 훈련으로 인한 GPS 신호 간헐적 유실 및 NDB 개정에 따른 400FT AGL 이하 조기 선회 금지.",
-                        filed: "EGOBA Y697 LANAT SID 출항 시 GPS Primary 확인 및 400FT 이상 상승 후 선회 준수",
-                        status: "COMPLIANT",
-                        verdict: "✅ 규정 준수 (COMPLIANT)",
-                        desc: "FOM 6.4.4 규정에 따라 400FT 이상 안전고도 확보 후 선회하고, VOR/DME 항법 크로스체크를 유지합니다.",
-                        raw: `30MAY24 01:15 - UFN RKSI Z0511/24
-E) CAUTIONARY INFO FOR ACFT OPERATING IN INCHEON FIR : PILOTS HAVE REPORTED THAT GPS SIGNALS ARE UNRELIABLE OR LOST INTERMITTENTLY IN INCHEON FIR(AROUND INCHEON AND SEOUL AREA).`
-                    },
-                    {
-                        no: 6,
-                        title: "교체공항 온타리오(KONT) 정밀접근 최저치(Minima) 사전 확인 (KONT A1387/26, A1388/26)",
-                        rule: "KONT RWY 26R ILS CAT II/III 인가 불가 (NA) 및 RWY 26R ALS U/S, RWY 26L PAPI U/S.",
-                        filed: "지정 ALTN: KONT | 회항 시 CAT I ILS 접근 최저치 및 증가된 시정 기준(Vis/RVR) 적용",
-                        status: "COMPLIANT",
-                        verdict: "✅ 규정 준수 (COMPLIANT)",
-                        desc: "ILS CAT I 최저치(DA 200ft / RVR 2400)를 산정하고 등화 결함을 반영하여 안전하게 교체공항을 선정하였습니다.",
-                        raw: `25JUN26 07:34 - 30DEC26 23:59 KONT A1387/26
-E) NAV ILS RWY 26R CAT II/III NA`
-                    }
-                );
-            }
+/* What this airspace holds, counted. The phase comes from position in the
+   route; the rest is a tally of the document's own subject headings. */
+function firSentence(s) {
+  const cats = {};
+  s.items.forEach((i) => { const k = i.categoryKo; if (k) cats[k] = (cats[k] || 0) + 1; });
+  const top = Object.entries(cats).sort((a, b) => b[1] - a[1]).slice(0, 3)
+    .map(([k, v]) => k + ' ' + v + '건').join(', ');
+  const head = s.phase === '이륙 · 초기 상승' ? '이륙 및 초기 상승 단계가 포함된 공역입니다'
+             : s.phase === '강하 · 착륙' ? '강하 및 착륙 단계가 포함된 공역입니다'
+             : '순항 구간입니다';
+  return head + (top ? '. ' + top + '이 고시되어 있습니다' : '') + '.';
+}
 
-            // 4. Caution Airport Breakdown Table Data with Raw Text
-            const cautionAirports = !hasFlightProfile ? [] : isJfkToIcn ? [
-                { stn: "RKSI", id: "Z0511/24", item: "인천 FIR 군 훈련으로 인한 GPS 신호 간헐적 교란", action: "Nuisance GPWS 경보 주의, VOR/DME 크로스체크", raw: "30MAY24 01:15 - UFN RKSI Z0511/24\nE) CAUTIONARY INFO FOR ACFT OPERATING IN INCHEON FIR : PILOTS HAVE REPORTED THAT GPS SIGNALS ARE UNRELIABLE OR LOST INTERMITTENTLY IN INCHEON FIR(AROUND INCHEON AND SEOUL AREA)." },
-                { stn: "RKSI", id: "COAD05/26", item: "NDB 개정으로 인한 FMS 400FT AGL 이하 조기 선회 금지", action: "이륙/복행 시 400ft 이전 선회 금지 (FOM 6.4.4)", raw: "15JUN26 00:00 - 31DEC26 23:59 RKSI COAD05/26\nE) COMPANY ADVISORY: EARLY TURN BELOW 400FT AGL PROHIBITED AFTER NDB REVISION." },
-                { stn: "RKSI", id: "A1073/26", item: "Taxilane R23, R24 Code E까지만 진입 가능", action: "Code F(A380) 진입 불가, Stand 208R/290R 유의", raw: "31JUL26 04:34 - 30SEP26 16:00 RKSI A1073/26\nE) TXL R23, R24 AVBL FOR ACFT UP TO ICAO CODE E WHEN TAXIING TO STAND 208R, 290R" },
-                { stn: "RKSS", id: "COAD01/21", item: "공항 심야 커퓨 (1400 ~ 2100Z)", action: "심야 도착 시 커퓨 시간대 착륙 제한 확인", raw: "01JAN21 00:00 - PERM RKSS COAD01/21\nE) AIRPORT CURFEW 1400-2100Z DAILY." },
-                { stn: "RKSS", id: "A0908/26", item: "RWY 14L/32R 커퓨 시간대(1400-2000Z) 공사 폐쇄", action: "회항 시 RWY 14R/32L 단일 활주로 착륙", raw: "29JUN26 14:00 - 31AUG26 20:00 RKSS A0908/26\nE) RWY 14L/32R CLSD DUE TO WIP" },
-                { stn: "RKSS", id: "A1104/26", item: "TWY B1, C1, D1, E1, G1 정지선등(Stop Bar Light) 시범 운영", action: "정지선등 점등 시 관제 허가와 불일치해도 정지 후 재확인", raw: "17AUG26 00:00 - 31AUG26 14:59 RKSS A1104/26\nE) STOP BAR LIGHT AT TWY B1,C1,D1,E1,G1 FOR RWY 14R/32L WILL BE OPR TRIAL BASIS." }
-            ] : [
-                { stn: "KLAX", id: "COAD02/21", item: "D-10 / C-10 Taxilane Ramp Control 주파수 절차", action: "D-10 북측 131.850MHz, C-10 남측 129.325MHz 확인", raw: "20OCT21 00:00 - UFN KLAX COAD02/21\nE) D-10 / C-10 TAXILANE TAXI PROCEDURES INFO" },
-                { stn: "KLAX", id: "A4733/26", item: "북측 주 활주로 RWY 07L/25R 포장 공사 전면 폐쇄", action: "남측 25L/24R 또는 06L/24R 착륙 배정 브리핑 준비", raw: "29AUG26 07:30 - 29AUG26 13:30 KLAX A4733/26\nE) RWY 07L/25R CLSD DUE TO PAVEMENT REHABILITATION WORK" },
-                { stn: "KLAX", id: "A4372/26", item: "TWY B (B3~B1) 날개폭 118FT 초과 통행 금지", action: "A380(날개폭 261ft) 진입 불가, TWY C 우회 필수", raw: "06AUG26 07:30 - 01SEP26 13:30 KLAX A4372/26\nE) TWY B BTN TWY B3 AND TWY B1 CLSD TO ACFT WINGSPAN MORE THAN 118FT" },
-                { stn: "KONT", id: "A1769/26", item: "RWY 26L PAPI 운용 불능 (U/S)", action: "야간 착륙 시 시각 진입각 참조 불가 유의", raw: "27AUG26 17:06 - 09SEP26 23:59 KONT A1769/26\nE) RWY 26L PAPI U/S" },
-                { stn: "KONT", id: "A1388/26", item: "RWY 26R ALS(진입등화) 운용 불능 (U/S)", action: "저시정 착륙 시 최저치(Vis/RVR) 상향 확인", raw: "25JUN26 07:41 - 30DEC26 23:59 KONT A1388/26\nE) RWY 26R ALS U/S" },
-                { stn: "KONT", id: "A1387/26", item: "ILS RWY 26R CAT II/III 인가 불가 (NA)", action: "정밀접근 CAT I 최저치(Minima) 적용", raw: "25JUN26 07:34 - 30DEC26 23:59 KONT A1387/26\nE) NAV ILS RWY 26R CAT II/III NA" }
-            ];
+/* 운항 영향, spelled out. The list view shows counts because it has one line
+   per item; the report has room, and a count alone ("조항 충족 2") does not say
+   which clause or how it was met - which is the whole question. */
+const CV = { OK: ['충족', 'v-ok'], CHECK: ['확인 필요', 'v-check'],
+             NA: ['해당 없음', 'v-na'], UNKNOWN: ['판정 불가', 'v-unk'] };
 
-            // 5. Checklist Items
-            const checklist = !hasFlightProfile ? [] : isJfkToIcn ? [
-                { text: "KJFK 출발 이륙 활주로 집중 및 지상 정체 대비", desc: "RWY 04L/22R & 04R/22L 동시 폐쇄(A7259/58). 31L/13R 단일 이륙 집중 대비 추가 택시 연료 및 시간 관리." },
-                { text: "KJFK 출항 시 RNAV 상태 점검", desc: "JFK VOR & CRI VOR 운용 중단(A7174/A7252). Kennedy Five SID 출항 시 GPS Primary 정상 확인." },
-                { text: "캐나다 구간 비상 회항 시 CYUL(몬트리올) 배제", desc: "CYUL 날개폭 213ft 제한 및 타사기 회항 불가 고시(E4479/E4943). 비상 시 CYYZ(토론토) 등 인가 공항 선정." },
-                { text: "캄차카 반도 인근 화산재(Volcanic Ash) 회피", desc: "클류체프스코이 화산 ORANGE 경보(PAZA A2428/26). FL250 이하 화산재 연기 주의." },
-                { text: "김포(RKSS) 회항 시 커퓨 및 활주로 14L 폐쇄 확인", desc: "심야 커퓨(1400-2100Z) 및 RWY 14L/32R 폐쇄(A0908/26)에 따라 14R 단일 착륙 대비." }
-            ] : [
-                { text: "KLAX 착륙 활주로 사전 확인", desc: "RWY 07L/25R 일시 폐쇄(A4733/26)에 따라 남측 활주로(25L/24R) 또는 06L/24R 착륙 브리핑 준비." },
-                { text: "KLAX 지상 활주 시 A380 날개폭(261ft) 제한 확인", desc: "TWY B (B3~B1) 구간 날개폭 118ft 초과 진입 금지(A4372/26). A380 인가 TWY 우회 필수." },
-                { text: "캄차카 남측 대양 통과 시 화산재(Volcanic Ash) 감시", desc: "클류체프스코이 화산 ORANGE 경보(PAZA A2428/26). FL250 이하 화산재 연기 주의 및 순항고도 유지." },
-                { text: "인천 FIR 상승 중 GPS 신호 유실 주의", desc: "군 훈련 GPS 간섭(Z0511/24) 발생 시 Nuisance GPWS 대응 및 VOR/DME 백업 크로스체크." },
-                { text: "KONT 회항 시 착륙 최저치 재계산", desc: "RWY 26L PAPI U/S 및 RWY 26R ALS U/S, ILS 26R CAT II/III 불가 반영." }
-            ];
+/* Space and time in one sentence: how close we come, when we are there, and
+   whether the NOTAM is live at that moment. The whole-flight window can say
+   "overlaps" while the moment of closest approach falls hours outside it -
+   CZUL H5625/26 comes into force at 1200Z and AAR223 passes it at 0744Z. */
+function passageLine(x) {
+  const p = x.passage;
+  if (!p) return null;
+  const at = utc(p.tMs);
+  const near = Math.round(p.nm) + 'NM';
+  const where = p.between.filter(Boolean).join('~');
+  const head = '최근접 ' + near + (where ? ' (' + where + ' 사이)' : '') + ' · 통과 예정 ' + at;
 
-            // 6. In-flight Monitoring Reminders
-            const inFlightReminders = !hasFlightProfile ? [] : isJfkToIcn ? [
-                { title: "PAZA CPDLC Logon 주소 전환 확인", desc: "GOATS 진입 시 PAZA로 접속 ➔ 서경 167°W~174°W 서쪽 통과 시 PAZN 주소 사용 (PAZA A0044/24)." },
-                { title: "CZUL/CZWG 통과 시 레이더/주파수 점검", desc: "Brisay Radar U/S(H5625/26) 및 위니펙 일부 주파수 단절(G3067/26)에 따른 고도/항로 변경 지연 가능성 대비." },
-                { title: "인천 접근 시 GPS 모니터링", desc: "인천 FIR 진입 후 군 훈련 GPS 간섭(RKRR Z0555/26)으로 인한 EGPWS 불필요 경보 발생 여부 주시." }
-            ] : [
-                { title: "대양 진입 전 CPDLC Logon 전환", desc: "후쿠오카 RJJJ 통과 후 앵커리지 PAZA ➔ 오클랜드 해양 KZAK 구간별 CPDLC 정상 연동 확인." },
-                { title: "태평양 NOPAC / UPR 대양 위치 보고", desc: "대양 경도선(170W, 160W, 150W, 140W, 130W) 통과 시 ADS-C / CPDLC 보고 주기 정상 점검." },
-                { title: "KLAX ATIS 수신 및 터미널 램프 주파수 확인", desc: "LA 진입 전 ATIS를 통해 활주로 07L/25R 폐쇄 상태 및 남측 25L/24R 착륙 절차 재확인." }
-            ];
+  // How much room there is matters as much as which side of the line we are
+  // on. KZAK A4226/26 comes into force 22 minutes after AAR203 passes it - a
+  // modest delay puts the flight inside it.
+  if (p.reason === 'BEFORE_START') {
+    const gap = p.startsMs ? mins((p.startsMs - p.tMs) / 60000) : null;
+    return ['calc', head + ' · 이 시각에는 아직 발효 전입니다 (발효 ' + utc(p.startsMs) +
+      (gap ? ', ' + gap + ' 전에 통과' : '') + ')'];
+  }
+  if (p.reason === 'AFTER_END') {
+    const gap = p.endsMs ? mins((p.tMs - p.endsMs) / 60000) : null;
+    return ['calc', head + ' · 이 시각에는 이미 종료되었습니다 (종료 ' +
+      (p.endsMs ? utc(p.endsMs) : '—') + (gap ? ', ' + gap + ' 후에 통과' : '') + ')'];
+  }
+  if (p.reason === 'IN_FORCE' && p.dailyAt === false) {
+    return ['calc', head + ' · 유효기간에는 들지만 일일 운영시간 밖입니다'];
+  }
+  if (p.reason === 'IN_FORCE') {
+    return ['warn', head + ' · 이 시각에 발효 중입니다'];
+  }
+  return ['plain', head + ' · 유효기간을 읽지 못해 그 시각 발효 여부는 판정하지 않았습니다'];
+}
 
-            return {
-                meta: {
-                    filename,
-                    callsign,
-                    flightNo,
-                    reg,
-                    acftType,
-                    dep,
-                    dest,
-                    altn,
-                    isJfkToIcn,
-                    isIcnToLax,
-                    hasFlightProfile,
-                    routeSource,
-                    flightTime,
-                    routeText,
-                    refileStr,
-                    etpStr,
-                    firStr
-                },
-                criticalNotams,
-                compliancePoints,
-                cautionAirports,
-                checklist,
-                inFlightReminders
-            };
+function impactBlock(it) {
+  const x = it.xc;
+  const rows = [];
+  const pl = passageLine(x);
+  if (pl) rows.push([pl[0], esc(pl[1])]);
+
+  (x.cdr || []).forEach((c) => rows.push(['calc', esc(cdrDetail(c))]));
+  // The FIR-entry daily check is the coarse form of the same question - it uses
+  // the moment we cross into the FIR, not the moment we pass the thing itself.
+  // When passageLine() has answered it, two clocks on one NOTAM read as a
+  // contradiction (CZUL H5625/26 showed 0640Z and 0744Z side by side).
+  if (x.dailyCheck && !x.passage) {
+    const d = x.dailyCheck;
+    const hh = (m) => String(Math.floor(m / 60)).padStart(2, '0') + String(m % 60).padStart(2, '0');
+    rows.push([d.inWindow ? 'warn' : 'calc', esc(
+      '일일 운영시간 ' + d.spec + ' · 이 공역 진입 예정 ' + hh(d.entry) + 'Z · ' +
+      (d.inWindow ? '운영 시간대 안' : '운영 시간대 밖'))]);
+  }
+  if (x.geo && !x.passage) {
+    rows.push(['calc', esc((x.geo.lateralClear ? '항로에서 ' : '항로가 도형에 저촉 ') +
+      Math.round(x.geo.minNm) + 'NM' + (x.geo.radius ? ' (고시 반경 ' + x.geo.radius + 'NM)' : '') +
+      (x.geo.vertClear === true ? ' · 계획 고도가 고시 고도대와 분리됨'
+        : x.geo.vertClear === false ? ' · 계획 고도가 고시 고도대와 겹침' : ''))]);
+  }
+  if (x.geo && x.passage && x.geo.vertClear !== null && x.geo.vertClear !== undefined) {
+    rows.push(['calc', esc(x.geo.vertClear ? '계획 고도가 고시 고도대와 분리됨'
+                                           : '계획 고도가 고시 고도대와 겹침')]);
+  }
+  ((x.zones && x.zones.banned) || []).forEach((z) => rows.push([z.entered ? 'warn' : 'calc',
+    esc(z.entered ? '금지 공역을 항로가 관통함' : '금지 공역에서 ' + Math.round(z.nearestNm) + 'NM')]));
+  ((x.zones && x.zones.gates) || []).forEach((g) => rows.push([g.crosses ? 'warn' : 'calc',
+    esc(g.crosses ? '고시 구간선을 항로가 교차함' : '고시 구간선에서 ' + Math.round(g.nearestNm) + 'NM')]));
+
+  // Clause by clause, with the reasoning the engine produced.
+  if (x.conditions) {
+    const scored = x.conditions.filter((c) => c.verdict === 'OK' || c.verdict === 'CHECK' || c.verdict === 'UNKNOWN');
+    scored.forEach((c) => rows.push([c.verdict === 'CHECK' ? 'warn' : c.verdict === 'UNKNOWN' ? 'unk' : 'calc',
+      '<b>' + esc(c.ref) + '항 ' + CV[c.verdict][0] + '</b> — ' + esc(c.why || '')]));
+    const na = x.conditions.filter((c) => c.verdict === 'NA').length;
+    const man = x.conditions.filter((c) => c.verdict === 'MANUAL').length;
+    const tail = [];
+    if (na) tail.push('이 비행에 해당 없는 조항 ' + na + '건');
+    if (man) tail.push('기계 판정 규칙이 없어 직접 읽어야 하는 조항 ' + man + '건');
+    if (tail.length) rows.push(['plain', esc(tail.join(', '))]);
+  }
+
+  if (!rows.length) return '<i>' + esc(knownWithoutGeometry(it)) + '</i>';
+  return rows.map(([k, t]) => '<div class="iv ' + k + '">' + t + '</div>').join('');
+}
+
+/* ==================================================================
+ * 항로 개요도
+ *
+ * A schematic, not a chart. Drawn as inline SVG from coordinates the
+ * document already printed - no tiles, so it works with the wifi off,
+ * which is the point on a flight deck.
+ *
+ * Longitudes are unwrapped along the track instead of wrapped into
+ * [-180,180]: these routes cross the antimeridian, and a plain plot puts
+ * the Pacific half on the wrong side of the page.
+ * ================================================================== */
+function unwrapTrack(pts) {
+  if (!pts.length) return [];
+  const out = [{ x: pts[0].lon, p: pts[0] }];
+  for (let i = 1; i < pts.length; i += 1) {
+    let d = pts[i].lon - pts[i - 1].lon;
+    while (d > 180) d -= 360;
+    while (d < -180) d += 360;
+    out.push({ x: out[i - 1].x + d, p: pts[i] });
+  }
+  return out;
+}
+
+/* Put a loose coordinate on the same unwrapped scale, next to whichever
+   track point it actually sits near. */
+function placeLon(track, lat, lon) {
+  if (!track.length) return lon;
+  let best = 0, bestD = Infinity;
+  for (let i = 0; i < track.length; i += 1) {
+    let dl = lon - track[i].p.lon;
+    while (dl > 180) dl -= 360;
+    while (dl < -180) dl += 360;
+    const d = Math.abs(dl) + Math.abs(lat - track[i].p.lat);
+    if (d < bestD) { bestD = d; best = i; }
+  }
+  let dl = lon - track[best].p.lon;
+  while (dl > 180) dl -= 360;
+  while (dl < -180) dl += 360;
+  return track[best].x + dl;
+}
+
+/* Every coordinate shape the engine could read, with the item it came from. */
+/* The coordinate shapes one NOTAM states. */
+function itemShapes(it) {
+  const out = [], x = it.xc;
+  if (x.area && x.area.kind === 'circle' && x.area.centre) {
+    out.push({ kind: 'circle', c: x.area.centre, r: x.area.radiusNm });
+  } else if (x.area && x.area.points && x.area.points.length) {
+    out.push({ kind: x.area.points.length >= 3 ? 'poly' : 'pts', pts: x.area.points });
+  }
+  ((x.zones && x.zones.banned) || []).forEach((z) => {
+    if (z.points && z.points.length) out.push({ kind: 'poly', pts: z.points, ban: true });
+  });
+  ((x.zones && x.zones.gates) || []).forEach((g) => {
+    if (g.a && g.b) out.push({ kind: 'line', pts: [g.a, g.b] });
+  });
+  return out;
+}
+
+const hasMap = (it) => itemShapes(it).length > 0 &&
+  ((DATA.track && DATA.track.pts) || []).length >= 2;
+
+/* Land, clipped to the window the map is showing.
+ *
+ * Coastline longitudes are plain [-180,180]; the map's are unwrapped along the
+ * track. Each vertex is shifted by whichever multiple of 360 lands it in the
+ * window - O(1), and correct across the antimeridian. A ring that genuinely
+ * spans the dateline then has neighbours 360 apart, so the path is broken
+ * wherever consecutive points jump more than 180 rather than drawing a line
+ * straight across the map.
+ */
+function coastPaths(x0, x1, y0, y1, sx, sy) {
+  if (typeof COASTLINE === 'undefined') return '';
+  const cx = (x0 + x1) / 2;
+  // Margin in proportion to the window, not a fixed number of degrees: these
+  // maps frame anything from 3 to 80 degrees.
+  const mx = (x1 - x0) * 0.35, my = (y1 - y0) * 0.35;
+  const out = [];
+  for (const ring of COASTLINE) {
+    let d = '', prevX = null, started = false, drew = false;
+    for (let i = 0; i < ring.length; i += 2) {
+      const lat = ring[i + 1];
+      const X = ring[i] + 360 * Math.round((cx - ring[i]) / 360);
+      if (prevX !== null && Math.abs(X - prevX) > 180) { started = false; }
+      prevX = X;
+      // Keep a margin so shapes crossing the edge still close visibly.
+      const inX = X > x0 - mx && X < x1 + mx;
+      const inY = lat > y0 - my && lat < y1 + my;
+      if (!inX || !inY) { started = false; continue; }
+      d += (started ? 'L' : 'M') + sx(X).toFixed(1) + ' ' + sy(lat).toFixed(1) + ' ';
+      started = true; drew = true;
+    }
+    if (drew) out.push('<path d="' + d.trim() + '" class="land"/>');
+  }
+  return out.join('');
+}
+
+/* Where this one NOTAM sits relative to the route.
+ *
+ * Framed on the shape and the point of closest approach, so the gap being
+ * reported is the thing you see. The rest of the track runs through for
+ * context and is simply clipped by the viewBox.
+ *
+ * Inline SVG, no tiles: this has to work with the wifi off. */
+function itemMapSvg(id) {
+  const it = DATA.items.find((x) => x.id === id);
+  if (!it) return '<div class="empty">항목을 찾지 못했습니다.</div>';
+  const pts = (DATA.track && DATA.track.pts) || [];
+  const shapes = itemShapes(it);
+  if (!shapes.length || pts.length < 2) return '<div class="empty">그릴 좌표가 없습니다.</div>';
+
+  const track = unwrapTrack(pts);
+  const P = it.xc.passage;
+
+  const xs = [], ys = [];
+  shapes.forEach((sh) => {
+    const list = sh.kind === 'circle' ? [sh.c] : sh.pts;
+    sh.xy = list.map((q) => {
+      const X = placeLon(track, q.lat, q.lon);
+      xs.push(X); ys.push(q.lat);
+      return { X, Y: q.lat };
+    });
+    if (sh.kind === 'circle' && sh.r) {
+      const d = sh.r / 60;
+      xs.push(sh.xy[0].X - d, sh.xy[0].X + d);
+      ys.push(sh.xy[0].Y - d, sh.xy[0].Y + d);
+    }
+  });
+  let near = null;
+  if (P && P.at) {
+    near = { X: placeLon(track, P.at.lat, P.at.lon), Y: P.at.lat };
+    xs.push(near.X); ys.push(near.Y);
+  }
+
+  const spanX = Math.max(...xs) - Math.min(...xs);
+  const spanY = Math.max(...ys) - Math.min(...ys);
+  const pad = Math.max(1.5, Math.max(spanX, spanY) * 0.45);
+  const x0 = Math.min(...xs) - pad, x1 = Math.max(...xs) + pad;
+  const y0 = Math.min(...ys) - pad, y1 = Math.max(...ys) + pad;
+
+  const W = 760, H = Math.max(240, Math.min(460, Math.round(W * (y1 - y0) / (x1 - x0))));
+  const sx = (X) => ((X - x0) / (x1 - x0)) * W;
+  const sy = (Y) => H - ((Y - y0) / (y1 - y0)) * H;
+
+  const grid = [];
+  const stepY = (y1 - y0) > 20 ? 10 : (y1 - y0) > 6 ? 5 : 1;
+  for (let g = Math.ceil(y0 / stepY) * stepY; g <= y1; g += stepY) {
+    grid.push('<line x1="0" y1="' + sy(g).toFixed(1) + '" x2="' + W + '" y2="' + sy(g).toFixed(1) +
+      '" class="gl"/><text x="4" y="' + (sy(g) - 3).toFixed(1) + '" class="gt">' + g + '°</text>');
+  }
+
+  const line = track.map((t, i) => (i ? 'L' : 'M') + sx(t.x).toFixed(1) + ' ' +
+    sy(t.p.lat).toFixed(1)).join(' ');
+
+  const wps = track.filter((t) => t.p.name &&
+      sx(t.x) > -20 && sx(t.x) < W + 20 && sy(t.p.lat) > -20 && sy(t.p.lat) < H + 20)
+    .map((t) => '<circle cx="' + sx(t.x).toFixed(1) + '" cy="' + sy(t.p.lat).toFixed(1) +
+      '" r="3" class="wp"/><text x="' + (sx(t.x) + 5).toFixed(1) + '" y="' +
+      (sy(t.p.lat) - 5).toFixed(1) + '" class="wl">' + esc(t.p.name) + '</text>').join('');
+
+  const cls = 'sh ' + bucket(it);
+  const drawn = shapes.map((sh) => {
+    if (sh.kind === 'circle') {
+      const c = sh.xy[0];
+      const rp = Math.max(3, Math.abs(sy(c.Y) - sy(c.Y + (sh.r || 0) / 60)));
+      return '<circle cx="' + sx(c.X).toFixed(1) + '" cy="' + sy(c.Y).toFixed(1) +
+        '" r="' + rp.toFixed(1) + '" class="' + cls + '"/>';
+    }
+    const d = sh.xy.map((q, i) => (i ? 'L' : 'M') + sx(q.X).toFixed(1) + ' ' +
+      sy(q.Y).toFixed(1)).join(' ');
+    if (sh.kind === 'poly') return '<path d="' + d + ' Z" class="' + cls + (sh.ban ? ' ban' : '') + '"/>';
+    if (sh.kind === 'line') return '<path d="' + d + '" class="' + cls + ' gate"/>';
+    return sh.xy.map((q) => '<circle cx="' + sx(q.X).toFixed(1) + '" cy="' + sy(q.Y).toFixed(1) +
+      '" r="4.5" class="' + cls + '"/>').join('');
+  }).join('');
+
+  // The gap itself, drawn: route point to the coordinate it was measured from.
+  let leader = '';
+  if (near && P && P.target) {
+    const tX = placeLon(track, P.target.lat, P.target.lon);
+    leader = '<path d="M' + sx(near.X).toFixed(1) + ' ' + sy(near.Y).toFixed(1) +
+      ' L' + sx(tX).toFixed(1) + ' ' + sy(P.target.lat).toFixed(1) + '" class="lead"/>' +
+      '<circle cx="' + sx(near.X).toFixed(1) + '" cy="' + sy(near.Y).toFixed(1) +
+      '" r="4.5" class="near"/>' +
+      '<text x="' + (sx(near.X) + 7).toFixed(1) + '" y="' + (sy(near.Y) + 14).toFixed(1) +
+      '" class="nl">' + Math.round(P.nm) + 'NM' + (P.tMs ? ' · ' + utc(P.tMs) : '') + '</text>';
+  }
+
+  const cap = P
+    ? '항로 최근접 ' + Math.round(P.nm) + 'NM' +
+      (P.between.filter(Boolean).length ? ' (' + esc(P.between.filter(Boolean).join('~')) + ' 사이)' : '') +
+      (P.tMs ? ' · 통과 예정 ' + utc(P.tMs) : '')
+    : '이 고시의 좌표와 항로';
+
+  return '<svg viewBox="0 0 ' + W + ' ' + H + '" preserveAspectRatio="xMidYMid meet" class="rmap">' +
+      coastPaths(x0, x1, y0, y1, sx, sy) + grid.join('') +
+      '<path d="' + line + '" class="rt"/>' + drawn + leader + wps +
+    '</svg>' +
+    '<p class="mnote">' + cap + ' · 등거리 원통도법 개요도이며 <b>항법용이 아닙니다</b>.</p>';
+}
+
+function summaryReport() {
+  const b = DATA.firBriefing;
+  if (!b || !b.segments.length) return '<div class="empty">요약할 자료가 없습니다.</div>';
+  const f = DATA.fpl;
+  const route = b.segments.map((s) => (s.name ? s.name.ko + ' FIR' : s.fir)).join(' → ');
+  const depName = (f && firName2(f.dep)) || (f && f.dep) || '';
+  const title = (f ? (f.callsign ? f.callsign + ' ' : '') + f.dep + '-' + f.dest : '운항편');
+
+  const tot = b.segments.reduce((a, s) => {
+    ['total', 'critical', 'computed'].forEach((k) => { a[k] = (a[k] || 0) + s.stats[k]; });
+    return a;
+  }, {});
+
+  const secs = b.segments.map((s, idx) => {
+    const notable = s.items.filter((i) => i.reasonCategory === 'CRITICAL' || evidenceLine(i));
+    const body = notable.length
+      ? notable.map((i) => {
+          const pg = pageOf(i);
+          const ev = evidenceLine(i);
+          const ko = String(i.koreanExplanation || '');
+          const generic = /원문 세부 사항 참조|원문을 확인/.test(ko) || ko.length < 12;
+          return '<div class="ri' + (i.reasonCategory === 'CRITICAL' ? ' crit' : '') + '">' +
+            '<div class="rt">' + esc(itemTitle(i)) +
+              ' <span class="rid">(' + esc(i.id) + (pg ? ', Page ' + pg : '') + ')</span>' +
+              (i.reasonCategory === 'CRITICAL' ? ' <span class="rc">운항 직결 필수</span>' : '') +
+            '</div>' +
+            '<div class="rr"><span>내용</span>' + esc(generic ? firstLine(i).slice(0, 190) : ko) + '</div>' +
+            '<div class="rr im"><span>운항 영향</span><div class="ivs">' +
+              impactBlock(i) + '</div></div>' +
+            // A map only where there are coordinates to draw. An item with no
+            // stated geometry gets no button rather than an empty panel.
+            (hasMap(i)
+              ? '<details class="imap" data-id="' + esc(i.id) + '">' +
+                  '<summary><span class="chev">&#9656;</span>🗺 항로 대비 위치</summary>' +
+                  '<div class="imapbody"></div></details>'
+              : '') +
+          '</div>';
+        }).join('')
+      : '<div class="rnone">기계가 근거를 낸 항목은 없습니다. ' + s.stats.total +
+        '건 전부 목록 화면에서 원문으로 확인하십시오.</div>';
+
+    return '<section class="rsec"><h3><span class="no">' + (idx + 1) + '.</span> ' +
+      esc((s.name ? s.name.ko : s.fir) + ' 비행정보구역') +
+      ' <span class="rcode">(' + esc(s.fir) + (s.name ? ' / ' + esc(s.name.en) + ' FIR' : '') + ')</span></h3>' +
+      '<p class="rlead">' + esc(firSentence(s)) +
+        (s.enterMs !== null ? ' 진입 예정 ' + utc(s.enterMs) : '') +
+        (s.enterAt ? ' (' + esc(s.enterAt) + ')' : '') + '</p>' +
+      body + '</section>';
+  }).join('');
+
+  return '<div class="report">' +
+    '<p class="rintro">항공기는 ' + esc(depName ? depName + '을 이륙하여' : (f ? f.dep + '에서 이륙하여' : '')) +
+      ' ' + esc(route) + ' 순으로 비행하게 되며, FIR별 제한 사항은 다음과 같습니다.</p>' +
+    '<h2 class="rtitle">[FIR별 운항 분석 보고서] ' + esc(title) + '</h2>' +
+    secs +
+    '<div class="rfoot"><b>이 보고서가 말할 수 있는 것</b>' +
+      '<p>거리·고도·시각·조항 대조로 근거를 낸 항목이 ' + tot.computed + '건, ' +
+      '원문을 읽어야 하는 항목이 ' + (tot.total - tot.computed) + '건' +
+      (tot.critical ? '이며 그중 운항 직결 필수가 ' + tot.critical + '건입니다.' : '입니다.') +
+      ' 계산되지 않은 항목에 대해 이 보고서는 아무것도 판정하지 않았습니다. ' +
+      '준수 여부의 최종 판단은 조종사가 합니다.</p></div>' +
+  '</div>';
+}
+
+function firSummary() {
+  const b = DATA.firBriefing;
+  if (!b || !b.segments.length) return '';
+  const f = DATA.fpl;
+  const route = b.segments.map((s) => (s.name ? s.name.ko + ' FIR' : s.fir)).join(' → ');
+  const depName = (f && firName2(f.dep)) || (f && f.dep) || '';
+
+  const tot = b.segments.reduce((a, s) => {
+    ['total', 'critical', 'computed', 'review', 'shaded', 'conditionsOk', 'conditionsCheck', 'conditionsUnknown']
+      .forEach((k) => { a[k] = (a[k] || 0) + s.stats[k]; });
+    return a;
+  }, {});
+
+  const seg = b.segments.map((s) => {
+    // Worth naming: anything critical, and anything the engine computed.
+    const notable = s.items.filter((i) =>
+      i.reasonCategory === 'CRITICAL' || evidenceLine(i));
+    // Each FIR folds on its own. Nothing is capped: a summary that ends in
+    // "and 5 more" is the one place a pilot cannot tell whether the 5 mattered.
+    return '<details class="fseg"' + (notable.length ? ' open' : '') + '>' +
+      '<summary>' +
+      '<div class="fh"><span class="chev">&#9656;</span>' +
+        '<b>' + esc(s.name ? s.name.ko : s.fir) + '</b>' +
+        '<span class="code">' + esc(s.fir) + (s.name ? ' / ' + esc(s.name.en) + ' FIR' : '') + '</span>' +
+        '<span class="n">' + s.stats.total + '건</span></div>' +
+      '<div class="fmeta">' + esc(s.phase) +
+        (s.enterMs !== null ? ' · 진입 ' + utc(s.enterMs) : '') +
+        (s.enterAt ? ' @' + esc(s.enterAt) : '') +
+        (s.source === 'EET' ? ' · <span class="warnish">EET 추정</span>' : '') +
+        (s.airports.length ? ' · 공항 ' + esc(s.airports.join(' · ')) : '') +
+      '</div>' +
+      '<div class="fstat">' +
+        (s.stats.critical ? '<i class="k crit">운항 직결 필수 ' + s.stats.critical + '</i>' : '') +
+        (s.stats.computed ? '<i class="k calc">계산 근거 ' + s.stats.computed + '</i>' : '') +
+        (s.stats.review ? '<i class="k rev">확인 필요 ' + s.stats.review + '</i>' : '') +
+        (s.stats.shaded ? '<i class="k mute">음영 ' + s.stats.shaded + '</i>' : '') +
+      '</div></summary>' +
+      (notable.length
+        ? '<ul class="fitems">' + notable.map((i) => {
+            const ev = evidenceLine(i);
+            // 내용: the Korean summary the engine writes when it recognises the
+            // NOTAM type. It falls back to a generic line for types it does not
+            // know, and in that case the raw text says more than the fallback.
+            const ko = String(i.koreanExplanation || '');
+            const generic = /원문 세부 사항 참조|원문을 확인/.test(ko) || ko.length < 12;
+            const what = generic ? firstLine(i).slice(0, 150) : ko;
+            const pg = pageOf(i);
+            return '<li' + (i.reasonCategory === 'CRITICAL' ? ' class="crit"' : '') + '>' +
+              '<div class="ttl"><b>' + esc(i.id) + '</b>' +
+                (pg ? '<span class="pg">Page ' + pg + '</span>' : '') +
+                (i.reasonCategory === 'CRITICAL' ? '<span class="cf">운항 직결 필수</span>' : '') +
+                (i.subjectLabel ? '<span class="sj">' + esc(i.subjectLabel) + '</span>' : '') +
+              '</div>' +
+              '<div class="wh"><span>내용</span>' + esc(what) + '</div>' +
+              '<div class="im"><span>운항 영향</span>' +
+                (ev ? esc(ev) : '<i>' + esc(knownWithoutGeometry(i)) + '</i>') +
+              '</div></li>';
+          }).join('') + '</ul>'
+        // A FIR with nothing computed still has NOTAMs. Saying so beats an
+        // expander that opens onto nothing.
+        : '<p class="fnone">이 공역에서 기계가 근거를 낸 항목은 없습니다. ' +
+          s.stats.total + '건 전부 아래 목록에서 원문으로 확인하십시오.</p>') +
+      '</details>';
+  }).join('');
+
+  return '<details class="pkg fir" open><summary><span class="chev">&#9656;</span><span>' +
+    '<h2>FIR별 운항 요약</h2><div class="sub">' +
+      esc('항공기는 ' + (depName ? depName + '을 이륙하여 ' : (f ? f.dep + '에서 이륙하여 ' : '')) +
+          route + ' 순으로 비행하며, FIR별 제한 사항은 다음과 같습니다') +
+    '</div></span><span class="cnt">' + b.segments.length + ' FIR</span></summary>' +
+    '<div class="firbody">' + seg +
+    '<p class="foot">이 요약은 <b>계산된 것만</b> 말합니다. 거리·고도·시각·조항 대조로 근거를 낸 것이 ' +
+      tot.computed + '건이고, 원문을 읽어야 하는 것이 ' + (tot.total - tot.computed) + '건' +
+      (tot.critical ? '이며 그중 운항 직결 필수가 ' + tot.critical + '건입니다. ' : '입니다. ') +
+      '준수 여부의 최종 판단은 조종사가 합니다.</p></div></details>';
+}
+
+function render() {
+  const d = DATA;
+  const p = (n) => d.items.filter((i) => i.pkg === n);
+  document.getElementById('out').innerHTML =
+    firSummary() +
+    section('PACKAGE 1 · 출발 · 목적지 · 교체공항',
+            [...new Set(p(1).map((i) => i.station))].join(' · ') || '—', p(1), { open: true }) +
+    section('PACKAGE 3 · 항로',
+            'FIR ' + d.firSeq.map((f) => f.fir).join(' → '), p(3), { open: true }) +
+    section('PACKAGE 2 · 재출항 · ETP · 항로상 회항공항',
+            '분석 제외 — 요청 시에만 대조합니다', p(2), { excluded: true, flat: true });
+}
+
+function segs() {
+  const inScope = DATA.items.filter((i) => i.pkg !== 2);
+  const n = (f) => inScope.filter((it) => {
+    const b = bucket(it);
+    return f === "all" ? true : f === "hot" ? (b === "crit" || b === "calc" || b === "rev")
+         : f === "active" ? b !== "shade" : b === "shade";
+  }).length;
+  document.getElementById('segs').innerHTML =
+    [["hot", "중요만"], ["active", "음영 제외"], ["all", "전체"], ["shade", "음영만"]]
+      .map(([k, t]) => '<button class="seg" data-f="' + k + '" aria-pressed="' + (k === filter) + '">' +
+        t + '<span class="n">' + n(k) + '</span></button>').join('') +
+    '<span class="views">' +
+      '<button class="view" data-v="report" aria-pressed="' + (view === 'report') + '">요약</button>' +
+      '<button class="view" data-v="list" aria-pressed="' + (view === 'list') + '">목록</button>' +
+      '<button class="view" data-v="raw" aria-pressed="' + (view === 'raw') + '"' +
+        (LAYOUT ? '' : ' disabled title="PDF를 열었을 때만 됩니다"') + '>원문 PDF</button>' +
+    '</span>';
+  document.querySelectorAll('.seg').forEach((b) => b.addEventListener('click', () => {
+    filter = b.dataset.f; segs();
+    if (view === 'list') { render(); window.scrollTo({ top: 0, behavior: 'smooth' }); }
+    else if (view === 'report') setView('report');
+  }));
+  document.querySelectorAll('.view').forEach((b) => b.addEventListener('click', () => {
+    if (b.hasAttribute('disabled')) return;
+    setView(b.dataset.v);
+    window.scrollTo({ top: 0, behavior: 'smooth' });
+  }));
+}
+
+function header(name) {
+  const w = DATA.window;
+  const t = (ms) => { const x = new Date(ms);
+    return String(x.getUTCHours()).padStart(2, '0') + String(x.getUTCMinutes()).padStart(2, '0') + 'Z'; };
+  const f = DATA.fpl;
+  document.getElementById('flt').innerHTML =
+    '<b>' + esc(f ? (f.callsign || '') + ' ' + f.dep + '→' + f.dest : name) + '</b>' +
+    '<span>비행창 ' + (w ? t(w.start) + ' – ' + t(w.end) : '—') + '</span>' +
+    '<span>FL ' + (DATA.levels ? DATA.levels.min + '–' + DATA.levels.max : '—') + '</span>' +
+    '<span>웨이포인트 ' + DATA.wpCount + '</span>' +
+    '<span>NOTAM ' + DATA.items.length + '</span>';
+}
+
+/* ==================================================================
+ * RAW view - the actual PDF, marked where the engine found something.
+ *
+ * Pages are drawn only while they are near the viewport and released as
+ * they leave it. A 99-page OFP at retina scale is well over 400MB of
+ * canvas if it is all kept, and Safari kills the tab long before that.
+ * ================================================================== */
+let LAYOUT = null;          // { pages, doc } from extractPdfLayout
+let PAGE_MARKS = null;      // page number -> marks to draw
+let view = "list";
+
+/* Runs of text belonging to one NOTAM, merged into line rectangles. Items
+   arrive one text run at a time; a row is the run of them sharing a baseline. */
+function mergeRows(items) {
+    const sorted = items.slice().sort((a, b) => (a.y - b.y) || (a.x - b.x));
+    const rows = [];
+    for (const it of sorted) {
+        const last = rows[rows.length - 1];
+        if (last && Math.abs(it.y - last.y) <= 2.5) {
+            last.x = Math.min(last.x, it.x);
+            last.r = Math.max(last.r, it.x + it.w);
+            last.h = Math.max(last.h, it.h);
+        } else {
+            rows.push({ x: it.x, y: it.y, r: it.x + it.w, h: it.h || 8 });
         }
+    }
+    return rows.filter((r) => r.r - r.x > 1).map((r) => ({ x: r.x, y: r.y, w: r.r - r.x, h: r.h }));
+}
 
-        function triggerFilePicker() {
-            document.getElementById('pdfFileInput').click();
-        }
-
-        async function handleFileSelected(e) {
-            const file = e.target.files[0];
-            if (!file) return;
-            processPdfFile(file);
-        }
-
-        async function handleDrop(e) {
-            e.preventDefault();
-            const file = e.dataTransfer.files[0];
-            if (file && file.type === "application/pdf") {
-                processPdfFile(file);
-            }
-        }
-
-        async function processPdfFile(file) {
-            document.getElementById('loadingIndicator').classList.remove('hidden');
-
-            try {
-                const { pageCount, fullText } = await extractTextFromPdfFile(file);
-                const briefing = buildExecutiveBriefing(fullText, file.name);
-                
-                // Parse full raw list
-                allParsedNotams = parseAllRawNotamsWithShading(fullText);
-                lastDocText = fullText;
-                userShadingMap = {};
-
-                renderExecutiveReport(briefing);
-                renderRawNotamWorkbench();
-            } catch (err) {
-                alert("PDF 파싱 중 오류가 발생했습니다: " + err.message);
-            } finally {
-                document.getElementById('loadingIndicator').classList.add('hidden');
-            }
-        }
-
-        function renderExecutiveReport(b) {
-            const doc = document.getElementById('reportDocument');
-            const isJfkToIcn = (b.meta.isJfkToIcn !== undefined) ? b.meta.isJfkToIcn : (b.meta.dep === "KJFK");
-
-            // Nothing was recognised in this document. Previously the app fell
-            // through to the stored AAR223 briefing and printed a green
-            // "verified compliant" banner over zero parsed NOTAMs - a briefing
-            // for somebody else's flight. Stop here instead.
-            if (!allParsedNotams.length) {
-                document.getElementById('headerSubtitle').innerText =
-                    b.meta.filename + " \u2014 NOTAM 미인식";
-                doc.innerHTML = '<div class="p-5 bg-rose-950/40 border border-rose-800/70 rounded-xl">'
-                    + '<div class="flex items-start gap-3">'
-                    + '<i data-lucide="alert-triangle" class="w-5 h-5 text-rose-400 shrink-0 mt-0.5"></i>'
-                    + '<div class="space-y-2">'
-                    + '<strong class="text-sm font-bold text-rose-200 block">이 문서에서 NOTAM을 하나도 인식하지 못했습니다</strong>'
-                    + '<p class="text-xs text-slate-300 leading-relaxed">브리핑을 생성하지 않습니다. 지원하는 NOTAM 패키지 형식이 아니거나, 스캔 PDF라 텍스트 추출이 되지 않는 문서일 수 있습니다.</p>'
-                    + '<p class="text-xs text-slate-400">파일: <span class="font-mono text-slate-300">' + b.meta.filename + '</span></p>'
-                    + '</div></div></div>';
-                lucide.createIcons();
-                return;
-            }
-
-            // Never print a stored default for something the document did not say.
-            const dep = b.meta.dep || "미확인";
-            const dest = b.meta.dest || "미확인";
-            const altn = b.meta.altn || "문서에서 확인되지 않음";
-            const flightTime = b.meta.flightTime || "문서에서 확인되지 않음";
-            document.getElementById('headerSubtitle').innerText = `${b.meta.flightNo} (${b.meta.callsign}) | ${dep} ➔ ${dest} | ${b.meta.acftType} ${b.meta.reg}`;
-
-            let html = `
-                <!-- 1. Header Overview -->
-                <div class="border-b border-slate-800 pb-6 space-y-4">
-                    <div class="flex flex-col sm:flex-row sm:items-center justify-between gap-2">
-                        <div>
-                            <span class="text-xs font-mono font-bold text-amber-400 tracking-wider uppercase">COCKPIT OPERATIONAL BRIEFING</span>
-                            <h1 class="text-xl sm:text-2xl font-black text-white tracking-wide mt-0.5">
-                                ✈️ ${b.meta.flightNo} NOTAM 종합 운항 브리핑 리포트
-                            </h1>
-                        </div>
-                        <div class="text-left sm:text-right">
-                            <span class="inline-flex items-center gap-1.5 px-3 py-1 rounded-full bg-slate-800 border border-slate-700 text-emerald-400 text-xs font-bold font-mono">
-                                <i data-lucide="check-circle-2" class="w-3.5 h-3.5"></i>
-                                항로 검토 자료 · 판정 아님
-                            </span>
-                        </div>
-                    </div>
-
-                    <div class="grid grid-cols-1 sm:grid-cols-2 gap-2 text-xs bg-slate-950/70 border border-slate-800 rounded-xl p-4 font-mono">
-                        <div><span class="text-slate-500">운항 편명:</span> <strong class="text-slate-200">${b.meta.callsign} / ${b.meta.flightNo} (${b.meta.reg}, ${b.meta.acftType})</strong></div>
-                        <div><span class="text-slate-500">비행 구간:</span> <strong class="text-amber-300">${dep} ➔ ${dest}</strong> (예상 비행시간: ${flightTime})</div>
-                        <div><span class="text-slate-500">지정 교체공항(ALTN):</span> <strong class="text-slate-200">${altn}</strong></div>
-                        <div><span class="text-slate-500">리파일(Refile) 공항:</span> <strong class="text-slate-200">${b.meta.refileStr}</strong></div>
-                        <div class="sm:col-span-2"><span class="text-slate-500">주요 ETP 및 회항 공항:</span> <span class="text-slate-300">${b.meta.etpStr}</span></div>
-                        <div class="sm:col-span-2"><span class="text-slate-500">통과 비행정보구역(FIR):</span> <span class="text-slate-300">${b.meta.firStr}</span></div>
-                    </div>
-                </div>
-
-                <!-- 2. Route review material - NOT an automated determination -->
-                <div class="space-y-3">
-                    <div class="p-4 bg-slate-950/70 border border-slate-800 rounded-xl flex items-start gap-3">
-                        <div class="p-1.5 bg-amber-500/15 text-amber-400 rounded-lg shrink-0 mt-0.5">
-                            <i data-lucide="clipboard-list" class="w-5 h-5"></i>
-                        </div>
-                        <div>
-                            <strong class="text-sm font-bold text-amber-200 block">[항로 검토 자료] 자동 준수 판정이 아닙니다</strong>
-                            <p class="text-xs text-slate-300 mt-1 leading-relaxed">
-                                아래 항목은 해당 구간에 대해 사전에 작성된 <strong>검토 참고 자료</strong>입니다.
-                                이 앱은 비행계획과 NOTAM을 대조해 준수 여부를 계산하지 않습니다.
-                                최종 판단은 반드시 원문과 디스패치 브리핑으로 확인하십시오.
-                            </p>
-                        </div>
-                    </div>
-
-                    ${b.meta.routeText ? `
-                        <div class="bg-slate-950 border border-slate-800 rounded-xl p-3.5 space-y-1">
-                            <span class="text-[11px] font-mono font-bold text-slate-500 uppercase tracking-wider block">[ 비행계획 제출 항로 (Filed Route) ]</span>
-                            <p class="font-mono text-xs text-sky-300/90 leading-relaxed break-all">${b.meta.routeText}</p>
-                        </div>
-                    ` : ''}
-                </div>
-
-                <!-- 3. Computed cross-check: evidence, not a verdict -->
-                ${(() => {
-                    const xc = buildCrossCheck(lastDocText, parseIcaoFpl(lastDocText), b.meta.routeText, allParsedNotams);
-                    if (!xc.ok) {
-                        return `<div class="p-4 bg-slate-950/70 border border-slate-800 rounded-xl text-xs text-slate-400 leading-relaxed">
-                            <strong class="text-slate-300 block mb-1">FPL ↔ NOTAM 자동 교차 대조: 수행 불가</strong>
-                            제출 비행계획서의 항로(15항) 또는 비행일자(DOF)를 문서에서 읽지 못했습니다.
-                            대조할 기준이 없으므로 아래 NOTAM 전수를 직접 확인하십시오.
-                        </div>`;
-                    }
-                    const fmt = (d) => d.toISOString().slice(0, 16).replace('T', ' ') + 'Z';
-                    return `
-                    <div class="space-y-3">
-                        <div class="flex flex-wrap items-center justify-between gap-2">
-                            <h2 class="text-sm font-bold text-white flex items-center gap-2">
-                                <i data-lucide="git-compare" class="w-4 h-4 text-amber-400"></i>
-                                FPL ↔ NOTAM 자동 교차 대조
-                            </h2>
-                            <span class="text-[11px] font-mono px-2 py-0.5 rounded bg-slate-800 border border-slate-700 text-slate-300">계산됨</span>
-                        </div>
-
-                        <div class="grid grid-cols-2 sm:grid-cols-4 gap-2 text-center font-mono">
-                            <div class="bg-slate-950 border border-slate-800 rounded-lg p-2.5">
-                                <div class="text-[10px] text-slate-500">전체</div>
-                                <div class="text-lg font-bold text-slate-200">${xc.total}</div>
-                            </div>
-                            <div class="bg-slate-950 border border-slate-800 rounded-lg p-2.5">
-                                <div class="text-[10px] text-slate-500">비행 시간대 밖</div>
-                                <div class="text-lg font-bold text-slate-400">${xc.outside}</div>
-                            </div>
-                            <div class="bg-slate-950 border border-slate-800 rounded-lg p-2.5">
-                                <div class="text-[10px] text-slate-500">공항 NOTAM</div>
-                                <div class="text-lg font-bold text-slate-300">${xc.airportCount}</div>
-                            </div>
-                            <div class="bg-slate-950 border border-rose-900/70 rounded-lg p-2.5">
-                                <div class="text-[10px] text-rose-400/80">항로 확인 필요</div>
-                                <div class="text-lg font-bold text-rose-300">${xc.review}</div>
-                            </div>
-                        </div>
-
-                        <div class="text-[11px] font-mono text-slate-500 bg-slate-950/60 border border-slate-800 rounded-lg px-3 py-2 leading-relaxed">
-                            대조 기준 — 비행창: <span class="text-slate-300">${fmt(xc.window.start)} ~ ${fmt(xc.window.end)}</span>
-                            · 공항: <span class="text-slate-300">${xc.airports.join(', ') || '-'}</span>
-                            · 항로 지점/항로 수: <span class="text-slate-300">${xc.routeTokenCount}</span>
-                            <br>통과 FIR(18항 EET/): <span class="text-slate-300">${xc.firs.join(', ') || '-'}</span>
-                        </div>
-
-                        <p class="text-[11px] text-slate-400 leading-relaxed">
-                            “항로 확인 필요”는 <strong class="text-slate-300">위반이 아니라</strong>,
-                            비행 시간대에 유효하면서 <strong class="text-slate-300">통과 FIR에서 발행되었거나 15항 항로의 지점·항로를 언급</strong>하고
-                            제한 표현을 포함한 NOTAM이라는 뜻입니다. 충족 여부는 기계가 판단하지 않으므로 반드시 직접 읽으십시오.
-                            <br class="hidden sm:block">
-                            ${xc.scoped ? `이 중 <strong class="text-slate-300">${xc.scoped}건</strong>은 NOTAM이 지정한 항공로·지점이 내 항로와 하나도 걹치지 않아 목록 맨 아래로 내렸습니다. 다만 지정 지점이 <em>경계</em>로 쓰인 경우(“… 북쪽으로 비행하라”)도 있으므로 숨기지는 않습니다.<br class="hidden sm:block">` : ''}
-                            ${xc.navNoise ? `항법시설 U/S NOTAM <strong class="text-slate-300">${xc.navNoise}건</strong>은 해당 시설이 내 항로에 없어 목록에서 제외했습니다 (아래 전체 NOTAM 목록에는 그대로 있습니다).<br class="hidden sm:block">` : ''}
-                            공항 NOTAM(출발·도착·교체·회항지)은 이 목록에 들어오지 않지만 <strong class="text-slate-300">사라지지 않습니다</strong> —
-                            위 “공항 NOTAM” 집계와 아래 공항별 탭에서 별도로 확인하십시오.
-                        </p>
-
-                        ${xc.rows.length ? `
-                        <div class="space-y-2.5">
-                            ${xc.rows.map((r) => {
-                                const why = [];
-                                const q = (arr) => (arr && arr.length)
-                                    ? arr.map((l) => `<div class="mt-1 font-mono text-[11px] text-slate-400 bg-slate-900 border-l-2 border-slate-700 pl-2 py-1 break-words">${l.replace(/&/g, "&amp;").replace(/</g, "&lt;").replace(/>/g, "&gt;")}</div>`).join('')
-                                    : '';
-
-                                why.push(r.result.timeState === "OVERLAP"
-                                    ? `\uc720\ud6a8\uae30\uac04 <span class="text-slate-300">${r.item.valid}</span> \u2014 \ube44\ud589\ucc3d\uacfc \uacb9\uce68`
-                                    : `\uc720\ud6a8\uae30\uac04 <span class="text-slate-300">${r.item.valid}</span> \u2014 \uc2dc\uac04 \ud310\ub2e8 \ubd88\uac00`);
-
-                                // The header validity can span months while the measure
-                                // itself only runs a couple of hours a day. Compare against
-                                // the moment we actually enter the issuing FIR.
-                                const dc = r.result.dailyCheck;
-                                if (dc) {
-                                    why.push(`\ud65c\uc131 \uc2dc\uac04\ub300 <span class="text-slate-300">D) ${dc.spec}</span> \u00b7 ${r.item.station} \uc9c4\uc785 <span class="text-slate-300">${hhmm(dc.entry)}Z</span> \u2014 `
-                                        + (dc.inWindow
-                                            ? '<span class="text-rose-300">\ucc3d \uc548</span>'
-                                            : '<span class="text-emerald-300">\ucc3d \ubc16</span>')
-                                        + (dc.dayQualified
-                                            ? '<div class="mt-1 text-[11px] text-slate-500">\uc694\uc77c/\uc77c\uc790 \uc870\uac74\uc774 \ud568\uaed8 \uc788\uc2b5\ub2c8\ub2e4 \u2014 \uc2dc\uac01\ub9cc \ub300\uc870\ud588\uc73c\ubbc0\ub85c \uc9c1\uc811 \ud655\uc778\ud558\uc2ed\uc2dc\uc624.</div>'
-                                            : ''));
-                                }
-
-                                if (r.result.firMatch) {
-                                    // Clauses like "FROM WINNIPEG FIR TO VANCOUVER FIR"
-                                    // hinge on where we entered this FIR and where we
-                                    // leave it. Both are in field 18 EET/, so say them.
-                                    const fc = r.result.firContext;
-                                    const chain = fc
-                                        ? `${fc.prev ? fc.prev + ' \u2192 ' : '\ucd9c\ubc1c \u2192 '}<span class="text-amber-300">${r.item.station}</span>${fc.next ? ' \u2192 ' + fc.next : ' \u2192 \ub3c4\ucc29'}`
-                                        : `<span class="text-amber-300">${r.item.station}</span>`;
-                                    why.push(`\ud1b5\uacfc FIR \ubc1c\ud589 (18\ud56d EET/) \u2014 ${chain}`
-                                        + (xc.levels
-                                            ? `<div class="mt-1 font-mono text-[11px] text-slate-400">\uacc4\ud68d \uace0\ub3c4 \ubc94\uc704 FL${xc.levels.min} ~ FL${xc.levels.max} (15\ud56d)</div>`
-                                            : ''));
-                                }
-                                if (r.result.airwaysTheirs.length) {
-                                    why.push(`<span class="text-slate-500">\uc774 NOTAM\uc774 \uc9c0\uc815\ud55c \ud56d\uacf5\ub85c \uc911 \ub0b4 \ud56d\ub85c\uc5d0 \uc5c6\ub294 \uac83: ${r.result.airwaysTheirs.join(', ')}</span>`);
-                                }
-                                if (r.result.namedTheirs.length) {
-                                    why.push(`<span class="text-slate-500">\uc774 NOTAM\uc774 \uc9c0\uc815\ud55c \uc9c0\uc810 \uc911 \ub0b4 \ud56d\ub85c\uc5d0 \uc5c6\ub294 \uac83: ${r.result.namedTheirs.join(', ')}</span>`
-                                        + `<div class="mt-1 text-[11px] text-slate-500">\uc9c0\uc810\uc774 \uc804\ubd80 \ub0b4 \ud56d\ub85c \ubc16\uc774\ub77c\uba74 \ub2e4\ub978 \ud68c\ub791\uc744 \ub300\uc0c1\uc73c\ub85c \ud55c \uc870\ud56d\uc77c \uc218 \uc788\uc2b5\ub2c8\ub2e4 (\ucd94\uc815 \u00b7 \ud310\uc815 \uadfc\uac70 \uc544\ub2d8)</div>`);
-                                }
-                                if (r.result.routeHits.length) {
-                                    // Which kind matched matters: an airway of ours named
-                                    // by a NOTAM is a stronger signal than a single fix.
-                                    const parts = [];
-                                    if (r.result.hitAirways.length) {
-                                        parts.push(`\ud56d\uacf5\ub85c <span class="text-amber-300">${r.result.hitAirways.join(', ')}</span>`);
-                                    }
-                                    if (r.result.hitFixes.length) {
-                                        parts.push(`\uc9c0\uc810 <span class="text-amber-300">${r.result.hitFixes.join(', ')}</span>`);
-                                    }
-                                    if (r.result.hitPoints.length) {
-                                        parts.push(`\uc704\uacbd\ub3c4\uc810 <span class="text-amber-300">${r.result.hitPoints.join(', ')}</span>`);
-                                    }
-                                    why.push(`15\ud56d \ud56d\ub85c \uc77c\uce58 \u2014 ${parts.join(' \u00b7 ')}`
-                                        + q(r.result.routeQuotes));
-                                }
-                                if (r.result.navaidHits.length) {
-                                    why.push(`<span class="text-slate-500">\ucc38\uace0 \u2014 \ud56d\ubc95\uc2dc\uc124 ${r.result.navaidHits.join(', ')} \uc77c\uce58 (\uc57d\ud55c \uadfc\uac70, \ud310\uc815\uc5d0\ub294 \ubbf8\ubc18\uc601)</span>`);
-                                }
-                                why.push(`\uc81c\ud55c \ud45c\ud604 <span class="text-rose-300">${r.result.limits.join(', ')}</span> \ud3ec\ud568`
-                                    + q(r.result.limitQuotes));
-
-                                // Distance and altitude are arithmetic. This is the one
-                                // place the app states a result rather than evidence -
-                                // hedged only by the polyline being an approximation.
-                                const g = r.result.geo;
-                                if (g) {
-                                    const a = r.result.area;
-                                    const dd = (v) => {
-                                        const d = Math.floor(Math.abs(v));
-                                        const m = Math.round((Math.abs(v) - d) * 60);
-                                        return `${d}\u00b0${String(m).padStart(2, '0')}'`;
-                                    };
-                                    const where = a.kind === 'circle'
-                                        ? `\ubc18\uacbd ${a.radiusNm}NM \u00b7 \uc911\uc2ec ${dd(a.centre.lat)}${a.centre.lat < 0 ? 'S' : 'N'} ${dd(a.centre.lon)}${a.centre.lon < 0 ? 'W' : 'E'}`
-                                        : `\uc88c\ud45c ${a.points.length}\uac1c\ub85c \uc815\uc758\ub41c \uad6c\uc5ed`;
-                                    const lat = g.lateralClear
-                                        ? `<span class="text-emerald-300">\uad6c\uc5ed \ubc16</span> \u2014 \ucd5c\uadfc\uc811 ${Math.round(g.minNm).toLocaleString()} NM`
-                                        : `<span class="text-rose-300">\uad6c\uc5ed \ub0b4/\uadfc\uc811</span> \u2014 \ucd5c\uadfc\uc811 ${Math.round(g.minNm).toLocaleString()} NM`;
-                                    let vert = '';
-                                    if (g.vertClear !== null && a.vert) {
-                                        const band = `FL${String(a.vert.lower).padStart(3, '0')} ~ ${a.vert.upper >= 999 ? 'UNL' : 'FL' + a.vert.upper}`;
-                                        vert = `<div class="mt-1">\uace0\ub3c4 ${band} \u00b7 \uacc4\ud68d FL${xc.levels.min}~FL${xc.levels.max} \u2014 ${g.vertClear
-                                            ? '<span class="text-emerald-300">\ubbf8\uad50\ucc28</span>'
-                                            : '<span class="text-rose-300">\uacb9\uce68</span>'}</div>`;
-                                    }
-                                    why.push(`<span class="text-slate-300">\uae30\ud558 \uacc4\uc0b0</span> \u2014 ${where}`
-                                        + `<div class="mt-1">${lat}</div>${vert}`
-                                        + `<div class="mt-1 text-[11px] text-slate-500">\ud56d\ub85c\ub294 15\ud56d \uc704\uacbd\ub3c4 \uc9c0\uc810 ${xc.routePointCount}\uac1c\ub97c \uc774\uc740 \uadfc\uc0ac\uc120\uc785\ub2c8\ub2e4. \uba85\uba85 \uc9c0\uc810\uc740 \ubb38\uc11c\uc5d0 \uc88c\ud45c\uac00 \uc5c6\uc2b5\ub2c8\ub2e4.</div>`);
-                                }
-
-                                // A conditional route is decidable end to end: the
-                                // airway is named, the window is timestamped, and the
-                                // OFP says when we are on it. Say so plainly, and say
-                                // how much delay it survives.
-                                const cd = r.result.cdr;
-                                if (cd) {
-                                    const zt = (ms) => {
-                                        const d = new Date(ms);
-                                        return `${String(d.getUTCDate()).padStart(2, '0')}일 `
-                                            + `${String(d.getUTCHours()).padStart(2, '0')}${String(d.getUTCMinutes()).padStart(2, '0')}Z`;
-                                    };
-                                    const hm = (m) => m >= 60 ? `${Math.floor(m / 60)}시간 ${m % 60}분` : `${m}분`;
-                                    cd.forEach((c) => {
-                                        const verdict = c.verdict === 'INSIDE'
-                                            ? '<span class="text-emerald-300">개방 시간 내</span>'
-                                            : c.verdict === 'OUTSIDE'
-                                                ? '<span class="text-rose-300">개방 시간 밖 — 이 항공로를 계획대로 쓸 수 없습니다</span>'
-                                                : '<span class="text-rose-300">일부 구간만 개방 시간 내</span>';
-                                        const slack = c.verdict === 'INSIDE' && c.marginMin > 0;
-                                        why.push(`<span class="text-slate-300">조건부 항공로 ${c.awy}</span> — 개방 ${zt(c.open.from)} ~ ${zt(c.open.to)}${c.alt ? ' · ' + c.alt : ''}`
-                                            + (c.enter
-                                                ? `<div class="mt-1">통과 예정 ${zt(c.enter)} ~ ${zt(c.exit)} — ${verdict}`
-                                                    + (slack ? ` · 종료까지 ${hm(c.marginMin)} 여유` : '') + '</div>'
-                                                    + (slack ? `<div class="mt-1 text-[11px] text-amber-300/80">출발이 ${hm(c.marginMin)} 이상 지연되면 개방 시간 밖이 됩니다.</div>` : '')
-                                                : '<div class="mt-1 text-amber-300">통과 시각 계산 불가 — OFP 누적시간을 읽지 못했습니다</div>')
-                                            + `<div class="mt-1 text-[11px] text-slate-500">해당 구간 ${c.legs.map((l) => l.from + '→' + l.to).join(', ')} · 시각은 OFP 누적시간 기준</div>`);
-                                    });
-                                }
-
-                                // A prohibition and a gate line have no grey band -
-                                // the route is inside or it is not, it crosses or it
-                                // does not - so these are stated flatly.
-                                const z = r.result.zones;
-                                if (z) {
-                                    const ll = (p) => `${Math.abs(p.lat).toFixed(1)}°${p.lat < 0 ? 'S' : 'N'} ${Math.abs(p.lon).toFixed(1)}°${p.lon < 0 ? 'W' : 'E'}`;
-                                    z.banned.forEach((bz) => {
-                                        why.push(`<span class="text-slate-300">금지 공역</span> — 좌표 ${bz.corners}개로 정의된 구역`
-                                            + `<div class="mt-1">${bz.entered
-                                                ? '<span class="text-rose-300">계획 항로가 이 구역을 통과합니다</span>'
-                                                : `<span class="text-emerald-300">통과하지 않습니다</span> — 최근접 ${Math.round(bz.nearestNm).toLocaleString()} NM`}</div>`);
-                                    });
-                                    z.gates.forEach((gt) => {
-                                        why.push(`<span class="text-slate-300">좌표 구간선</span> — ${ll(gt.a)} ~ ${ll(gt.b)}`
-                                            + `<div class="mt-1">${gt.crosses
-                                                ? '<span class="text-emerald-300">계획 항로가 이 선을 교차합니다</span>'
-                                                : `<span class="text-amber-300">교차하지 않습니다</span> — 최근접 ${Math.round(gt.nearestNm).toLocaleString()} NM`}</div>`
-                                            + `<div class="mt-1 text-[11px] text-slate-500">FIR 경계는 문서에 없습니다. 이 교차가 해당 FIR의 진입/이탈점인지는 판정하지 않습니다.</div>`);
-                                    });
-                                }
-
-                                // The restriction and the route mention never share a
-                                // line. Say so - it is usually the difference between
-                                // "this binds me" and "this defines someone else's track".
-                                if (r.result.separated) {
-                                    why.push(`<span class="text-amber-200">\u26a0 \ud56d\ub85c \uc77c\uce58 \uc904\uacfc \uc81c\ud55c \ud45c\ud604 \uc904\uc774 \uc11c\ub85c \ub2e4\ub985\ub2c8\ub2e4 \u2014 \uc81c\ud55c \ub300\uc0c1\uc774 \ub0b4 \ud56d\ub85c\uac00 \uc544\ub2d0 \uc218 \uc788\uc2b5\ub2c8\ub2e4. \uc6d0\ubb38\uc744 \ud655\uc778\ud558\uc2ed\uc2dc\uc624.</span>`);
-                                }
-
-                                const raw = highlightRaw(r.item.raw, r.result.routeHits, r.result.limitWords);
-
-                                return `
-                                <div class="bg-slate-950/70 border border-slate-800 rounded-xl p-3.5 space-y-2.5">
-                                    <div class="flex flex-wrap items-center gap-2">
-                                        <span class="font-mono text-sm font-bold text-amber-300">${r.item.id}</span>
-                                        <span class="text-[10px] font-mono px-1.5 py-0.5 rounded border ${r.result.firMatch ? 'bg-amber-500/10 border-amber-500/40 text-amber-300' : 'bg-slate-800 border-slate-700 text-slate-300'}">${r.result.firMatch ? '통과 FIR 공역' : '항로 지점 일치'}</span>
-                                        ${r.result.scopedElsewhere ? `<span class="text-[10px] font-mono px-1.5 py-0.5 rounded border bg-slate-800 border-slate-700 text-slate-400">지정 항로가 내 항로와 무관</span>` : ''}
-                                        <span class="text-[11px] font-mono text-slate-500 ml-auto">${r.item.station}</span>
-                                    </div>
-
-                                    <div class="bg-slate-900/70 border border-slate-800 rounded-lg p-2.5">
-                                        <span class="text-[10px] font-mono font-bold text-slate-500 uppercase tracking-wider block mb-1.5">교차 대조 결과</span>
-                                        <ul class="space-y-1 text-xs text-slate-400 leading-relaxed">
-                                            ${why.map((w) => `<li class="flex gap-1.5"><span class="text-slate-600">·</span><span>${w}</span></li>`).join('')}
-                                        </ul>
-                                    </div>
-
-                                    <details class="group">
-                                        <summary class="cursor-pointer text-xs font-mono text-slate-400 hover:text-amber-300 flex items-center justify-between gap-2 py-1">
-                                            <span class="flex items-center gap-1.5 font-bold">
-                                                <i data-lucide="terminal" class="w-3.5 h-3.5 text-slate-500"></i>
-                                                <span>NOTAM 원문 (Raw ICAO Text)</span>
-                                            </span>
-                                            <i data-lucide="chevron-down" class="w-3.5 h-3.5 text-slate-500 transition group-open:rotate-180"></i>
-                                        </summary>
-                                        <pre class="mt-2 p-3 bg-slate-900 border border-slate-800 rounded-lg font-mono text-[11px] text-slate-300 whitespace-pre-wrap break-words leading-relaxed">${raw}</pre>
-                                    </details>
-                                </div>`;
-                            }).join('')}
-                        </div>
-                        ${xc.review > xc.rows.length ? `<p class="text-[11px] text-slate-500">상위 ${xc.rows.length}건만 표시됩니다. 전체는 아래 NOTAM 목록에서 확인하십시오.</p>` : ''}
-                        ` : `<p class="text-xs text-slate-400">비행 시간대·통과 공역·제한 표현이 모두 걹치는 항로 NOTAM은 없습니다. 공항 NOTAM은 위 집계와 공항별 탭을 확인하십시오.</p>`}
-                    </div>`;
-                })()}
-
-                <!-- 3. Critical NOTAMs Section with Raw Text Box -->
-                <div class="space-y-4">
-                    <div class="flex items-center gap-2 pb-2 border-b border-rose-900/40 text-rose-400 font-bold text-sm">
-                        <i data-lucide="alert-octagon" class="w-5 h-5"></i>
-                        <span>🚨 🔴 [CRITICAL] 최우선 필수 확인 NOTAM (운항 직결)</span>
-                    </div>
-
-                    <div class="space-y-3">
-                        ${b.criticalNotams.map(n => `
-                            <div class="bg-slate-950/80 border ${n.badge === 'CRITICAL' ? 'border-rose-900/60' : (n.badge === 'WARNING' ? 'border-amber-900/60' : 'border-blue-900/60')} rounded-xl p-4 sm:p-5 space-y-3">
-                                <div class="flex flex-col sm:flex-row sm:items-center justify-between gap-1">
-                                    <h3 class="text-sm font-bold text-slate-100 flex items-center gap-2">
-                                        <span class="px-2 py-0.5 rounded text-[10px] font-mono font-bold ${n.badge === 'CRITICAL' ? 'bg-rose-950 text-rose-300 border border-rose-800' : (n.badge === 'WARNING' ? 'bg-amber-950 text-amber-300 border border-amber-800' : 'bg-blue-950 text-blue-300 border border-blue-800')}">
-                                            ${n.badge}
-                                        </span>
-                                        ${n.title}
-                                    </h3>
-                                    <span class="text-[11px] font-mono text-slate-500">${n.period}</span>
-                                </div>
-                                <p class="text-xs text-slate-300 leading-relaxed"><strong class="text-slate-400">내용:</strong> ${n.content}</p>
-                                <div class="bg-slate-900/90 border border-slate-800 rounded-lg p-3 text-xs text-amber-200/90 flex items-start gap-2.5">
-                                    <i data-lucide="shield-alert" class="w-4 h-4 text-amber-400 shrink-0 mt-0.5"></i>
-                                    <div>
-                                        <strong class="text-amber-300 font-semibold">조종사 조치사항:</strong>
-                                        <span class="ml-1">${n.action}</span>
-                                    </div>
-                                </div>
-                                
-                                <div class="pt-1">
-                                    <details class="group">
-                                        <summary class="cursor-pointer text-xs font-mono text-slate-400 hover:text-amber-300 flex items-center justify-between select-none py-1">
-                                            <span class="flex items-center gap-1.5 font-bold">
-                                                <i data-lucide="terminal" class="w-3.5 h-3.5 text-slate-500"></i>
-                                                <span>📄 ICAO NOTAM 원문 보기 (Raw Text)</span>
-                                            </span>
-                                            <i data-lucide="chevron-down" class="w-3.5 h-3.5 text-slate-500 transition group-open:rotate-180"></i>
-                                        </summary>
-                                        <pre class="mt-2 p-3 bg-slate-900/90 border border-slate-800 rounded-lg font-mono text-xs text-slate-300 whitespace-pre-wrap leading-relaxed">${n.raw}</pre>
-                                    </details>
-                                </div>
-                            </div>
-                        `).join('')}
-                    </div>
-                </div>
-
-                <!-- 4. Point-by-Point Route Compliance with Raw Text -->
-                <div class="space-y-4">
-                    <div class="flex items-center gap-2 pb-2 border-b border-emerald-900/40 text-emerald-400 font-bold text-sm">
-                        <i data-lucide="check-square" class="w-5 h-5"></i>
-                        <span>🔍 항로 NOTAM 제한사항별 상세 준수성 검증 (Point-by-Point)</span>
-                    </div>
-
-                    <div class="space-y-3">
-                        ${b.compliancePoints.map(cp => `
-                            <div class="bg-slate-950 border border-emerald-900/40 rounded-xl p-4 sm:p-5 space-y-2.5">
-                                <div class="flex flex-col sm:flex-row sm:items-center justify-between gap-1">
-                                    <h4 class="text-sm font-bold text-slate-100">${cp.no}. ${cp.title}</h4>
-                                    <span class="text-xs font-mono font-bold text-emerald-400">${cp.verdict}</span>
-                                </div>
-                                <div class="text-xs text-slate-400 leading-relaxed">
-                                    <span class="text-slate-500 font-semibold">NOTAM 제한 내용:</span> ${cp.rule}
-                                </div>
-                                <div class="bg-slate-900 border border-slate-800 rounded p-2.5 text-xs font-mono text-amber-300/90">
-                                    <span class="text-slate-400">현재 비행계획:</span> ${cp.filed}
-                                </div>
-                                <p class="text-xs text-slate-300 pt-0.5 leading-relaxed">${cp.desc}</p>
-                                
-                                ${cp.raw ? `
-                                    <details class="group pt-1">
-                                        <summary class="cursor-pointer text-xs font-mono text-slate-400 hover:text-emerald-300 flex items-center justify-between select-none py-1">
-                                            <span class="flex items-center gap-1.5 font-semibold">
-                                                <i data-lucide="terminal" class="w-3.5 h-3.5 text-slate-500"></i>
-                                                <span>📄 항로 NOTAM 규정 원문 (Raw Text)</span>
-                                            </span>
-                                            <i data-lucide="chevron-down" class="w-3.5 h-3.5 text-slate-500 transition group-open:rotate-180"></i>
-                                        </summary>
-                                        <pre class="mt-2 p-3 bg-slate-900/90 border border-slate-800 rounded-lg font-mono text-xs text-slate-300 whitespace-pre-wrap leading-relaxed">${cp.raw}</pre>
-                                    </details>
-                                ` : ''}
-                            </div>
-                        `).join('')}
-                    </div>
-                </div>
-
-                <!-- 5. Caution Airport Breakdown Table -->
-                <div class="space-y-4">
-                    <div class="flex items-center gap-2 pb-2 border-b border-amber-900/40 text-amber-400 font-bold text-sm">
-                        <i data-lucide="alert-triangle" class="w-5 h-5"></i>
-                        <span>🟡 [CAUTION] 공항별 핵심 운항 주의 사항</span>
-                    </div>
-
-                    <div class="overflow-x-auto">
-                        <table class="w-full text-left text-xs border border-slate-800 rounded-xl overflow-hidden">
-                            <thead class="bg-slate-950 text-slate-400 font-mono uppercase text-[11px] border-b border-slate-800">
-                                <tr>
-                                    <th class="p-3 w-20">공항</th>
-                                    <th class="p-3 w-28">NOTAM ID</th>
-                                    <th class="p-3">주요 내용 및 운항 영향</th>
-                                    <th class="p-3">조종사 조치사항</th>
-                                    <th class="p-3 w-20 text-center">원문</th>
-                                </tr>
-                            </thead>
-                            <tbody class="divide-y divide-slate-800/80 bg-slate-950/40">
-                                ${b.cautionAirports.map(ca => `
-                                    <tr class="hover:bg-slate-800/30 transition">
-                                        <td class="p-3 font-mono font-bold text-amber-400">${ca.stn}</td>
-                                        <td class="p-3 font-mono text-slate-400">${ca.id}</td>
-                                        <td class="p-3 font-medium text-slate-200">${ca.item}</td>
-                                        <td class="p-3 text-slate-300 italic">${ca.action}</td>
-                                        <td class="p-3 text-center">
-                                            <button onclick="toggleRawModal('${ca.id}', \`${ca.raw ? ca.raw.replace(/`/g, '\\`') : ''}\`)" class="px-2 py-1 bg-slate-800 hover:bg-slate-700 text-slate-300 font-mono text-[10px] rounded border border-slate-700 transition">
-                                                원문
-                                            </button>
-                                        </td>
-                                    </tr>
-                                `).join('')}
-                            </tbody>
-                        </table>
-                    </div>
-                </div>
-
-                <!-- 6. Enroute & FIR Special Notes (1 Column Full-Width Cards) -->
-                <div class="space-y-4">
-                    <div class="flex items-center gap-2 pb-2 border-b border-blue-900/40 text-blue-400 font-bold text-sm">
-                        <i data-lucide="compass" class="w-5 h-5"></i>
-                        <span>🧭 [ENROUTE & FIR] 항로 특이사항 및 공역 통제 지침</span>
-                    </div>
-
-                    <div class="space-y-3 text-xs">
-                        ${isJfkToIcn ? `
-                            <div class="bg-slate-950 border border-slate-800 rounded-xl p-4 space-y-2">
-                                <div class="flex items-center justify-between">
-                                    <strong class="font-bold text-blue-300 text-sm">몬트리올 / 위니펙 FIR (CZUL / CZWG)</strong>
-                                    <span class="text-[11px] font-mono text-slate-500">[H5625/26, G3067/26]</span>
-                                </div>
-                                <p class="text-slate-300 leading-relaxed">
-                                    • <strong>Brisay Radar U/S (H5625/26):</strong> 542318N 0703430W 반경 200NM 구역 내에서 항로 및 고도 변경 요청이 거부/지연될 수 있음.<br>
-                                    • <strong>위니펙 관제 주파수 장애 (G3067/26):</strong> Class A 공역 진입 지연(최대 30분) 또는 FL180 이하 조기 강하 지시 가능성에 대비.
-                                </p>
-                            </div>
-
-                            <div class="bg-slate-950 border border-slate-800 rounded-xl p-4 space-y-2">
-                                <div class="flex items-center justify-between">
-                                    <strong class="font-bold text-blue-300 text-sm">에드먼턴 FIR (CZEG)</strong>
-                                    <span class="text-[11px] font-mono text-slate-500">[F4091/26, F3405/26]</span>
-                                </div>
-                                <p class="text-slate-300 leading-relaxed">
-                                    • <strong>서향 통과 항로 지정 (F4091/26):</strong> FL290 이상 서향 통과 항공기는 VINKO-RABOX-NOVAR 또는 MEDAK-DATNO 이남/이북 지정 항로 준수.<br>
-                                    • <strong>북극 서향 크루징 일방통행 (F3405/26):</strong> 그린란드/북극 서향 비행 시 FL350 및 FL390 전용 일방통행(One-way) 배정.
-                                </p>
-                            </div>
-
-                            <div class="bg-slate-950 border border-slate-800 rounded-xl p-4 space-y-2">
-                                <div class="flex items-center justify-between">
-                                    <strong class="font-bold text-blue-300 text-sm">앵커리지 FIR (PAZA)</strong>
-                                    <span class="text-[11px] font-mono text-slate-500">[A0044/24, A1136/25]</span>
-                                </div>
-                                <p class="text-slate-300 leading-relaxed">
-                                    • <strong>CPDLC 로깅 구분 (A0044/24):</strong> 북위 73도 이북/서경 152~167도 서측은 PAZN, 이남은 PAZA로 CPDLC 로깅 주소 구분 접속.<br>
-                                    • <strong>GNSS 간섭 보고 (A1136/25):</strong> 태평양 진입 전 GNSS 간섭 및 항법 저하 발생 시 SFO Radio / CPDLC를 통해 앵커리지 ATC로 즉시 보고.
-                                </p>
-                            </div>
-
-                            <div class="bg-slate-950 border border-slate-800 rounded-xl p-4 space-y-2">
-                                <div class="flex items-center justify-between">
-                                    <strong class="font-bold text-blue-300 text-sm">인천 FIR (RKRR)</strong>
-                                    <span class="text-[11px] font-mono text-slate-500">[Z0632/26, D1768/26]</span>
-                                </div>
-                                <p class="text-slate-300 leading-relaxed">
-                                    • <strong>조건부 항로(CDR2) 직항 (Z0632/26):</strong> 조건부 항로 발효에 따라 BOPTA-PONIK 또는 KARBU-LANAT 직항 허가 ATC 요청 권장.<br>
-                                    • <strong>수도권 비행금지구역 회피 (D1768/26):</strong> 서울 중심부 반경 2NM 임시 비행금지구역(SFC~UNL)을 동남측 KARBU 픽스 경유로 안전 회피.
-                                </p>
-                            </div>
-                        ` : `
-                            <div class="bg-slate-950 border border-slate-800 rounded-xl p-4 space-y-2">
-                                <div class="flex items-center justify-between">
-                                    <strong class="font-bold text-blue-300 text-sm">일본 후쿠오카 FIR (RJJJ)</strong>
-                                    <span class="text-[11px] font-mono text-slate-500">[Q2056/26, Q2053/26]</span>
-                                </div>
-                                <p class="text-slate-300 leading-relaxed">
-                                    • <strong>PACOTS Track 14 동향 운영 (Q2056/26):</strong> KALNA ➔ CEPAS 대양 Flex 트랙 운영 중. 본 항공편은 NOPAC R580(OATIS-OPHET-AMOND)으로 분리 비행.<br>
-                                    • <strong>조건부 항로(CDR) 운영 (Q2053/26):</strong> L512 및 국내 연결 항로 개방 시간대 확인.
-                                </p>
-                            </div>
-
-                            <div class="bg-slate-950 border border-slate-800 rounded-xl p-4 space-y-2">
-                                <div class="flex items-center justify-between">
-                                    <strong class="font-bold text-blue-300 text-sm">앵커리지 & 오클랜드 해양 FIR (PAZA / KZAK)</strong>
-                                    <span class="text-[11px] font-mono text-slate-500">[PAZA A2472/26, KZAK A4261/26]</span>
-                                </div>
-                                <p class="text-slate-300 leading-relaxed">
-                                    • <strong>대양 UPR 동향(Eastbound) 지침 (PAZA A2472/26):</strong> 서향 교통류와 수평 분리(Lateral Separation)를 유지하며 대양 직항(55N170W..45N130W) 비행.<br>
-                                    • <strong>Oakland Oceanic Track J (KZAK A4261/26):</strong> 태평양 진입 후 CPDLC ADS-C 위치 보고 주기 확인.
-                                </p>
-                            </div>
-
-                            <div class="bg-slate-950 border border-slate-800 rounded-xl p-4 space-y-2">
-                                <div class="flex items-center justify-between">
-                                    <strong class="font-bold text-blue-300 text-sm">미국 시애틀 / 오클랜드 / LA 관제구역 (KZSE / KZOA / KZLA)</strong>
-                                    <span class="text-[11px] font-mono text-slate-500">[KZLA A3822/26, A3803/26]</span>
-                                </div>
-                                <p class="text-slate-300 leading-relaxed">
-                                    • <strong>KLAX 도착 계기절차 (STAR):</strong> NATTE ➔ OAK ➔ BURGL ➔ IRNMN2 표준 계기접근 절차로 원활한 강하 및 속도 제한 준수.<br>
-                                    • <strong>로스앤젤레스 권역 VOR 점검:</strong> JLI VOR(A3822/26) 비정상 영역 확인 및 RNAV 도착 절차 유지.
-                                </p>
-                            </div>
-                        `}
-                    </div>
-                </div>
-
-                <!-- 7. Action Checklist -->
-                <div class="space-y-4">
-                    <div class="flex items-center gap-2 pb-2 border-b border-amber-900/40 text-amber-400 font-bold text-sm">
-                        <i data-lucide="clipboard-check" class="w-5 h-5"></i>
-                        <span>📋 조종사 콕핏 핵심 액션 체크리스트 (Cockpit Action Checklist)</span>
-                    </div>
-
-                    <div class="bg-slate-950 border border-slate-800 rounded-xl p-4 space-y-2.5 font-mono text-xs">
-                        ${b.checklist.map((c, i) => `
-                            <label class="flex items-start gap-3 p-2.5 rounded-lg hover:bg-slate-900/80 cursor-pointer transition select-none">
-                                <input type="checkbox" class="mt-0.5 w-4 h-4 rounded border-slate-700 bg-slate-900 text-amber-500 focus:ring-0" />
-                                <div>
-                                    <strong class="text-slate-200 block">${i + 1}. ${c.text}</strong>
-                                    <span class="text-slate-400 block mt-0.5">${c.desc}</span>
-                                </div>
-                            </label>
-                        `).join('')}
-                    </div>
-                </div>
-
-                <!-- 8. In-Flight Monitoring Reminders -->
-                <div class="space-y-4">
-                    <div class="flex items-center gap-2 pb-2 border-b border-slate-800 text-slate-400 font-bold text-sm">
-                        <i data-lucide="radio" class="w-5 h-5"></i>
-                        <span>📋 비행 중 조종사 모니터링 항목 (In-Flight Reminders)</span>
-                    </div>
-
-                    <div class="space-y-2 text-xs">
-                        ${b.inFlightReminders.map(r => `
-                            <div class="bg-slate-950/60 border border-slate-800/80 rounded-xl p-3.5 flex items-start gap-3">
-                                <div class="w-1.5 h-1.5 rounded-full bg-amber-400 mt-1.5 shrink-0"></div>
-                                <div>
-                                    <strong class="text-slate-200 block font-bold">${r.title}:</strong>
-                                    <p class="text-slate-400 mt-0.5 leading-relaxed">${r.desc}</p>
-                                </div>
-                            </div>
-                        `).join('')}
-                    </div>
-                </div>
-            `;
-
-            doc.innerHTML = html;
-            lucide.createIcons();
-            window.scrollTo({ top: 0, behavior: 'smooth' });
-        }
-
-        /**
-         * Renders the Full Raw NOTAM List with Interactive Shading Controls.
-         */
-        function renderRawNotamWorkbench() {
-            // Update Station tabs
-            const stations = Array.from(new Set(allParsedNotams.map(x => x.station))).sort();
-            document.getElementById('rawStationTabs').innerHTML = `
-                <button onclick="filterByStation('ALL')" class="stn-pill ${currentStationTab === 'ALL' ? 'active bg-amber-500/15 border-amber-500/40 text-amber-300' : 'bg-slate-900 border-slate-800 text-slate-400'} px-2.5 py-1 rounded text-xs font-mono border transition" data-stn="ALL">전체 공항/FIR (${allParsedNotams.length})</button>
-                ${stations.map(stn => {
-                    const cnt = allParsedNotams.filter(x => x.station === stn).length;
-                    return `
-                        <button onclick="filterByStation('${stn}')" class="stn-pill ${currentStationTab === stn ? 'active bg-amber-500/15 border-amber-500/40 text-amber-300' : 'bg-slate-900 border-slate-800 text-slate-400'} px-2.5 py-1 rounded text-xs font-mono border transition" data-stn="${stn}">${stn} (${cnt})</button>
-                    `;
-                }).join('')}
-            `;
-
-            renderRawNotamList();
-        }
-
-        function isItemCurrentlyShaded(item) {
-            if (userShadingMap[item.id] !== undefined) {
-                return userShadingMap[item.id];
-            }
-            return item.autoShaded;
-        }
-
-        function renderRawNotamList() {
-            const container = document.getElementById('rawNotamContainer');
-            const searchKeyword = document.getElementById('rawSearchInput').value.toLowerCase().trim();
-
-            let totalCnt = allParsedNotams.length;
-            let activeCnt = 0;
-            let shadedCnt = 0;
-
-            allParsedNotams.forEach(item => {
-                const isShaded = isItemCurrentlyShaded(item);
-                if (isShaded) shadedCnt++;
-                else activeCnt++;
+function buildMarks() {
+    const byPage = new Map();
+    LAYOUT.pages.forEach((p) => byPage.set(p.page, []));
+    DATA.items.forEach((it) => {
+        if (!(it.to > it.at)) return;
+        const b = it.pkg === 2 ? "pkg2" : bucket(it);
+        LAYOUT.pages.forEach((p) => {
+            if (p.to <= it.at || p.from >= it.to) return;
+            const on = p.items.filter((x) => x.end > it.at && x.start < it.to);
+            if (!on.length) return;
+            const rows = mergeRows(on);
+            byPage.get(p.page).push({
+                cls: b,
+                id: it.id,
+                label: it.pkg === 2 ? "PKG2" : LABEL[b][0],
+                rows
             });
-
-            document.getElementById('cntTotal').innerText = totalCnt;
-            document.getElementById('cntActive').innerText = activeCnt;
-            document.getElementById('cntShaded').innerText = shadedCnt;
-
-            // Filter items
-            const filtered = allParsedNotams.filter(item => {
-                const isShaded = isItemCurrentlyShaded(item);
-
-                // Station filter
-                if (currentStationTab !== 'ALL' && item.station !== currentStationTab) return false;
-
-                // View mode: active only
-                if (viewOnlyActive && isShaded) return false;
-
-                // Reason filter
-                if (currentReasonFilter === 'ACTIVE_ONLY' && isShaded) return false;
-                if (currentReasonFilter === 'LIGHTING' && item.reasonCategory !== 'LIGHTING') return false;
-                if (currentReasonFilter === 'MARKING' && item.reasonCategory !== 'MARKING') return false;
-                if (currentReasonFilter === 'NON_FLIGHT_TIME' && item.reasonCategory !== 'NON_FLIGHT_TIME') return false;
-                if (currentReasonFilter === 'NON_FLIGHT_ROUTE' && item.reasonCategory !== 'NON_FLIGHT_ROUTE') return false;
-                if (currentReasonFilter === 'O\TACLE_LOW' && item.reasonCategory !== 'O\TACLE_LOW') return false;
-
-                // Keyword search
-                if (searchKeyword) {
-                    const haystack = `${item.id} ${item.station} ${item.raw} ${item.reasonBadge} ${item.reasonDetail} ${item.koreanExplanation}`.toLowerCase();
-                    if (!haystack.includes(searchKeyword)) return false;
-                }
-
-                return true;
-            });
-
-            if (filtered.length === 0) {
-                container.innerHTML = `
-                    <div class="bg-slate-950 border border-slate-800 rounded-xl p-10 text-center text-slate-500 font-mono text-xs">
-                        선택한 조건에 해당하는 NOTAM 원문이 없습니다.
-                    </div>
-                `;
-                return;
-            }
-
-            container.innerHTML = filtered.map(item => {
-                const isShaded = isItemCurrentlyShaded(item);
-                const isManualOverride = (userShadingMap[item.id] !== undefined);
-                const shadedClass = isShaded ? 'shaded-item' : 'border-slate-800 bg-slate-950/90 shadow-md';
-
-                let displayBadge = item.reasonBadge;
-                let displayDetail = item.reasonDetail;
-
-                if (isManualOverride) {
-                    if (isShaded) {
-                        displayBadge = "👤 수동 음영 (Pilot Override)";
-                        displayDetail = "조종사 판단에 따라 수동으로 음영화(Manual Shaded) 처리된 항목입니다.";
-                    } else {
-                        displayBadge = "🟢 수동 유효 전환 (Pilot Override)";
-                        displayDetail = "조종사 판단에 따라 필수 확인 항목으로 수동 활성화(Manual Unshaded) 처리되었습니다.";
-                    }
-                }
-
-                return `
-                    <div class="border rounded-xl p-4 sm:p-5 transition duration-200 space-y-3 ${shadedClass}">
-                        
-                        <!-- Top Header: ID, Badges, Period & Override Button -->
-                        <div class="flex flex-col sm:flex-row sm:items-center justify-between gap-2 pb-3 border-b border-slate-800/60">
-                            <div class="flex items-center gap-2 flex-wrap">
-                                <span class="font-mono text-sm sm:text-base font-black text-amber-400 tracking-wide">${item.id}</span>
-                                <span class="text-xs px-2 py-0.5 rounded bg-slate-800 text-slate-300 font-mono font-bold">[${item.station}]</span>
-                                
-                                ${isShaded ? `
-                                    <span class="text-[11px] px-2 py-0.5 rounded bg-slate-800/90 text-slate-300 border border-slate-700 font-mono font-medium">
-                                        ${displayBadge}
-                                    </span>
-                                ` : `
-                                    <span class="text-[11px] px-2 py-0.5 rounded bg-emerald-950/90 border border-emerald-800 text-emerald-300 font-mono font-bold">
-                                        ${displayBadge}
-                                    </span>
-                                `}
-                            </div>
-
-                            <!-- Right Controls: Valid Period + Toggle Shade Button -->
-                            <div class="flex items-center gap-3 shrink-0">
-                                <span class="text-[11px] font-mono text-slate-400">${item.valid}</span>
-                                <button 
-                                    onclick="toggleUserShade('${item.id}')" 
-                                    class="px-2.5 py-1 rounded text-xs font-mono font-semibold transition border ${isShaded ? 'bg-amber-500/15 border-amber-500/40 text-amber-300 hover:bg-amber-500/25' : 'bg-slate-800 border-slate-700 text-slate-300 hover:bg-slate-700'}"
-                                    title="사용자 판단에 따라 음영화/활성화 전환"
-                                >
-                                    ${isShaded ? '👁️ 음영 해제' : '🕶️ 음영화 (Shade)'}
-                                </button>
-                            </div>
-                        </div>
-
-                        <!-- 1. Korean Plain-Language Operational Explanation (한글 요약 해설) -->
-                        <div class="p-3 rounded-xl border border-sky-900/40 bg-sky-950/20 text-xs flex items-start gap-2.5">
-                            <span class="px-2 py-0.5 rounded bg-sky-900/80 border border-sky-700/80 text-sky-200 font-bold font-mono text-[10px] shrink-0 mt-0.5">
-                                📋 한글 요약
-                            </span>
-                            <p class="text-slate-100 font-sans text-xs sm:text-[13px] font-semibold leading-relaxed">
-                                ${item.koreanExplanation}
-                            </p>
-                        </div>
-
-                        <!-- 2. Shading Rationale / Operational Impact Status Banner -->
-                        <div class="p-2.5 rounded-lg border text-xs font-mono flex items-start gap-2 ${isShaded ? 'bg-slate-900/90 border-slate-800 text-slate-300' : 'bg-emerald-950/30 border-emerald-800/50 text-emerald-200'}">
-                            <span class="px-1.5 py-0.5 rounded ${isShaded ? 'bg-slate-800 text-amber-300 font-bold border border-slate-700' : 'bg-emerald-900/80 text-emerald-200 font-bold border border-emerald-700'} text-[10px] shrink-0">
-                                ${isShaded ? '💡 음영 사유' : '🎯 운항 영향'}
-                            </span>
-                            <span class="leading-relaxed text-[11px] sm:text-xs">${displayDetail}</span>
-                        </div>
-
-                        <!-- 3. Full ICAO Raw Text Box (원문 그대로) -->
-                        <div>
-                            <pre class="p-3 bg-slate-950 rounded-lg border border-slate-800/80 font-mono text-xs text-slate-200 whitespace-pre-wrap leading-relaxed selection:bg-amber-500/40">${item.raw}</pre>
-                        </div>
-
-                    </div>
-                `;
-            }).join('');
-
-            lucide.createIcons();
-        }
-
-        function toggleUserShade(id) {
-            const item = allParsedNotams.find(x => x.id === id);
-            if (!item) return;
-            const current = isItemCurrentlyShaded(item);
-            userShadingMap[id] = !current;
-            renderRawNotamList();
-        }
-
-        function toggleShadedViewMode() {
-            viewOnlyActive = !viewOnlyActive;
-            document.getElementById('txtViewMode').innerText = viewOnlyActive ? '유효 NOTAM만 표시 중' : '모든 원문 표시 (음영 포함)';
-            renderRawNotamList();
-        }
-
-        function batchShadeCategories() {
-            // This does not recalculate anything - it drops every manual override
-            // so the automatic rules apply again. That can be hundreds of
-            // decisions, so ask first and say plainly what is about to happen.
-            const overrides = Object.keys(userShadingMap).length;
-            if (overrides === 0) return;
-            const ok = confirm(
-                `수동으로 변경하신 음영 판정 ${overrides}건을 모두 버리고 ` +
-                `자동 음영 기준으로 되돌립니다.\n\n계속하시겠습니까?`
-            );
-            if (!ok) return;
-            userShadingMap = {};
-            renderRawNotamList();
-        }
-
-        function resetAllShadingOverrides() {
-            userShadingMap = {};
-            currentStationTab = 'ALL';
-            currentReasonFilter = 'ALL';
-            viewOnlyActive = false;
-            document.getElementById('rawSearchInput').value = '';
-            document.getElementById('txtViewMode').innerText = '모든 원문 표시 (음영 포함)';
-            
-            document.querySelectorAll('.stn-pill').forEach(el => {
-                el.className = `stn-pill ${el.dataset.stn === 'ALL' ? 'active bg-amber-500/15 border-amber-500/40 text-amber-300' : 'bg-slate-900 border-slate-800 text-slate-400'} px-2.5 py-1 rounded text-xs font-mono border transition`;
-            });
-
-            document.querySelectorAll('.pill-reason').forEach(el => {
-                el.className = `pill-reason ${el.dataset.reason === 'ALL' ? 'active bg-amber-500/15 border-amber-500/40 text-amber-300' : 'bg-slate-900 border-slate-800 text-slate-400'} px-2.5 py-1 rounded text-xs font-mono`;
-            });
-
-            renderRawNotamList();
-        }
-
-        function filterByStation(stn) {
-            currentStationTab = stn;
-            document.querySelectorAll('.stn-pill').forEach(el => {
-                if (el.dataset.stn === stn) {
-                    el.className = 'stn-pill active bg-amber-500/15 border-amber-500/40 text-amber-300 px-2.5 py-1 rounded text-xs font-mono border transition';
-                } else {
-                    el.className = 'stn-pill bg-slate-900 border-slate-800 text-slate-400 px-2.5 py-1 rounded text-xs font-mono border transition';
-                }
-            });
-            renderRawNotamList();
-        }
-
-        function filterByReason(reason) {
-            currentReasonFilter = reason;
-            document.querySelectorAll('.pill-reason').forEach(el => {
-                if (el.dataset.reason === reason) {
-                    el.className = 'pill-reason active bg-amber-500/15 border-amber-500/40 text-amber-300 px-2.5 py-1 rounded text-xs font-mono';
-                } else {
-                    el.className = 'pill-reason bg-slate-900 border-slate-800 text-slate-400 hover:text-slate-200 px-2.5 py-1 rounded text-xs font-mono';
-                }
-            });
-            renderRawNotamList();
-        }
-
-        function toggleRawModal(id, raw) {
-            if (!raw) return;
-            alert(`[${id} ICAO NOTAM 원문]\n\n${raw}`);
-        }
-
-        function loadSampleAAR223() {
-            const fullText = (typeof SAMPLE_AAR223_FULL_TEXT !== 'undefined') ? SAMPLE_AAR223_FULL_TEXT : "AAR223 KJFK RKSI";
-            const briefing = buildExecutiveBriefing(fullText, "AAR223_KJFK_RKSI_A380_PACKAGE.pdf");
-            allParsedNotams = parseAllRawNotamsWithShading(fullText);
-            lastDocText = fullText;
-            userShadingMap = {};
-            renderExecutiveReport(briefing);
-            renderRawNotamWorkbench();
-        }
-
-        function loadSampleAAR202() {
-            const fullText = (typeof SAMPLE_AAR202_FULL_TEXT !== 'undefined') ? SAMPLE_AAR202_FULL_TEXT : "AAR202 RKSI KLAX";
-            const briefing = buildExecutiveBriefing(fullText, "AAR202_RKSI_KLAX_A380_PACKAGE.pdf");
-            allParsedNotams = parseAllRawNotamsWithShading(fullText);
-            lastDocText = fullText;
-            userShadingMap = {};
-            renderExecutiveReport(briefing);
-            renderRawNotamWorkbench();
-        }
-
-        async function forceClearCacheAndReload() {
-            if ('caches' in window) {
-                const keys = await caches.keys();
-                await Promise.all(keys.map(k => caches.delete(k)));
-            }
-            if ('serviceWorker' in navigator) {
-                const registrations = await navigator.serviceWorker.getRegistrations();
-                for (let r of registrations) {
-                    await r.unregister();
-                }
-            }
-            window.location.reload();
-        }
-
-        // PWA Service Worker Registration with automatic update
-        if ('serviceWorker' in navigator) {
-            navigator.serviceWorker.register('./sw.js?v=6').then(reg => {
-                reg.update();
-            }).catch(err => console.log('SW Reg:', err));
-        }
-
-        // Load full 491-NOTAM AAR223 by default on initial view
-        window.addEventListener('DOMContentLoaded', () => {
-            loadSampleAAR223();
         });
-    </script>
+    });
+    PAGE_MARKS = byPage;
+}
+
+function drawOverlay(host, page) {
+    const marks = PAGE_MARKS.get(page.page) || [];
+    const k = host.clientWidth / page.width;
+    const frag = document.createDocumentFragment();
+    marks.forEach((m) => {
+        m.rows.forEach((r, i) => {
+            const d = document.createElement('div');
+            d.className = 'mk ' + m.cls;
+            d.style.cssText = 'left:' + (r.x * k) + 'px;top:' + (r.y * k) + 'px;' +
+                'width:' + (r.w * k) + 'px;height:' + (r.h * k + 2) + 'px';
+            frag.appendChild(d);
+            // One label per NOTAM, on its first line, and only for the marks a
+            // pilot is meant to stop at. Labelling every greyed light NOTAM
+            // would bury the four that matter.
+            if (i === 0 && (m.cls === 'crit' || m.cls === 'calc' || m.cls === 'rev')) {
+                const b = document.createElement('div');
+                b.className = 'badge ' + m.cls;
+                b.textContent = m.label + ' · ' + m.id;
+                b.style.cssText = 'left:' + (r.x * k) + 'px;top:' + (r.y * k - 1) + 'px';
+                frag.appendChild(b);
+            }
+        });
+    });
+    host.appendChild(frag);
+}
+
+async function renderPage(host) {
+    if (host.dataset.state === 'done' || host.dataset.state === 'busy') return;
+    host.dataset.state = 'busy';
+    const page = LAYOUT.pages[+host.dataset.i];
+    try {
+        const pdfPage = await LAYOUT.doc.getPage(page.page);
+        const cssW = host.clientWidth;
+        const dpr = Math.min(2, window.devicePixelRatio || 1);
+        const vp = pdfPage.getViewport({ scale: (cssW / page.width) * dpr });
+        const canvas = document.createElement('canvas');
+        canvas.width = Math.round(vp.width);
+        canvas.height = Math.round(vp.height);
+        await pdfPage.render({ canvasContext: canvas.getContext('2d'), viewport: vp }).promise;
+        host.innerHTML = '';
+        host.appendChild(canvas);
+        const no = document.createElement('div');
+        no.className = 'pgno';
+        no.textContent = page.page + ' / ' + LAYOUT.pages.length;
+        host.appendChild(no);
+        drawOverlay(host, page);
+        host.dataset.state = 'done';
+    } catch (e) {
+        host.dataset.state = '';
+        host.innerHTML = '<div class="ph">이 페이지를 그리지 못했습니다</div>';
+    }
+}
+
+function releasePage(host) {
+    if (host.dataset.state !== 'done') return;
+    host.innerHTML = '<div class="ph">' + (+host.dataset.i + 1) + ' 쪽</div>';
+    host.dataset.state = '';
+}
+
+let pageObserver = null;
+
+function renderRaw() {
+    const host = document.getElementById('raw');
+    if (!LAYOUT) {
+        host.innerHTML = '<div class="err">원문 보기는 PDF를 열었을 때만 됩니다. ' +
+            '번들 샘플은 텍스트만 있고 원본 파일이 없습니다.</div>';
+        return;
+    }
+    if (!PAGE_MARKS) buildMarks();
+
+    const counts = {};
+    PAGE_MARKS.forEach((v) => v.forEach((m) => { counts[m.cls] = (counts[m.cls] || 0) + 1; }));
+    const key = [['crit', '운항 직결 필수'], ['calc', '계산 근거'], ['rev', '확인 필요'],
+                 ['appl', '내 공항·항로'], ['shade', '음영'], ['pkg2', 'PKG2 (분석 제외)']]
+        .filter(([k]) => counts[k])
+        .map(([k, t]) => '<span class="k"><i class="sw mk ' + k + '"></i>' + t + ' ' + counts[k] + '</span>')
+        .join('');
+
+    host.innerHTML = '<div class="rawbar">' + key + '</div>' +
+        LAYOUT.pages.map((p, i) =>
+            '<div class="pg" data-i="' + i + '" style="max-width:' + Math.round(p.width * 1.6) + 'px;' +
+            'aspect-ratio:' + p.width + '/' + p.height + '"><div class="ph">' + p.page + ' 쪽</div></div>'
+        ).join('');
+
+    if (pageObserver) pageObserver.disconnect();
+    // Draw a screen ahead and behind; release anything three screens away.
+    pageObserver = new IntersectionObserver((entries) => {
+        entries.forEach((e) => {
+            if (e.isIntersecting) renderPage(e.target);
+            else if (Math.abs(e.boundingClientRect.top) > window.innerHeight * 3) releasePage(e.target);
+        });
+    }, { rootMargin: '900px 0px' });
+    host.querySelectorAll('.pg').forEach((el) => pageObserver.observe(el));
+}
+
+function setView(v) {
+    view = v;
+    document.getElementById('out').hidden = (v !== 'list');
+    document.getElementById('report').hidden = (v !== 'report');
+    document.getElementById('raw').hidden = (v !== 'raw');
+    document.querySelectorAll('.view').forEach((b) =>
+        b.setAttribute('aria-pressed', String(b.dataset.v === v)));
+    if (v === 'report') {
+        const host = document.getElementById('report');
+        host.innerHTML = summaryReport();
+        // Each NOTAM's map is drawn the first time its own button is opened.
+        host.querySelectorAll('details.imap').forEach((box) => {
+            box.addEventListener('toggle', () => {
+                const body = box.querySelector('.imapbody');
+                if (box.open && !body.innerHTML) body.innerHTML = itemMapSvg(box.dataset.id);
+            });
+        });
+    }
+    if (v === 'raw') renderRaw();
+    else if (pageObserver) pageObserver.disconnect();
+}
+
+function show(fullText, name) {
+  const out = document.getElementById('out');
+  out.innerHTML = '<div class="busy">분석 중…</div>';
+  // Yield once so the message actually paints before the engine blocks the
+  // thread; on a tablet this run is seconds, not milliseconds.
+  setTimeout(() => {
+    try {
+      DATA = analyseFlight(fullText);
+      PAGE_MARKS = null;                 // marks belong to this document only
+      document.getElementById('intake').style.display = 'none';
+      header(name); segs(); render(); setView('report');
+    } catch (e) {
+      out.innerHTML = '<div class="err">분석에 실패했습니다: ' + esc(e && e.message) + '</div>';
+    }
+  }, 30);
+}
+
+async function openPdf(file) {
+  const out = document.getElementById('out');
+  out.innerHTML = '<div class="busy">PDF를 읽는 중…</div>';
+  try {
+    // The layout carries the text plus where every run of it sits, which is
+    // what lets the RAW view mark the real page. Samples have no PDF behind
+    // them, so LAYOUT stays null there and the RAW button stays disabled.
+    LAYOUT = await extractPdfLayout(file);
+    show(LAYOUT.fullText, file.name);
+  } catch (e) {
+    out.innerHTML = '<div class="err">PDF를 읽지 못했습니다: ' + esc(e && e.message) + '</div>';
+  }
+}
+
+document.getElementById('pick').addEventListener('click', () => document.getElementById('file').click());
+document.getElementById('file').addEventListener('change', (e) => {
+  if (e.target.files && e.target.files[0]) openPdf(e.target.files[0]);
+});
+document.getElementById('s223').addEventListener('click', () => {
+  if (typeof SAMPLE_AAR223_FULL_TEXT === 'undefined') return;
+  LAYOUT = null;              // bundled text has no PDF behind it
+  show(SAMPLE_AAR223_FULL_TEXT, 'AAR223');
+});
+document.getElementById('s202').addEventListener('click', () => {
+  if (typeof SAMPLE_AAR202_FULL_TEXT === 'undefined') return;
+  LAYOUT = null;
+  show(SAMPLE_AAR202_FULL_TEXT, 'AAR202');
+});
+
+// This page is the one flown from - added to the home screen, opened on cabin
+// wifi. desktop.html registered the worker and this one did not, so a pilot who
+// bookmarked this page had no offline copy at all.
+// 화면에 찍는 빌드 표지. 배포할 때 sw.js 의 CACHE_NAME 과 같이 올린다 —
+// 아이패드에서 옛 버전이 떠도 조종사가 알아볼 방법이 없던 문제.
+const BUILD = 'v16 · 2026-09-14';
+document.getElementById('buildTag').textContent = BUILD;
+
+async function forceUpdate() {
+  try {
+    if ('caches' in window) {
+      const keys = await caches.keys();
+      await Promise.all(keys.map((k) => caches.delete(k)));
+    }
+    if ('serviceWorker' in navigator) {
+      const regs = await navigator.serviceWorker.getRegistrations();
+      await Promise.all(regs.map((r) => r.unregister()));
+    }
+  } catch (e) { /* 지우다 실패해도 새로고침은 한다 */ }
+  location.reload();
+}
+document.getElementById('forceUpdate').addEventListener('click', forceUpdate);
+
+if ('serviceWorker' in navigator) {
+  // 홈 화면 앱은 iOS 가 닫지 않고 멈춰 뒀다가 되살린다 — 페이지 로드가 다시 일어나지 않으므로
+  // 앞으로 나올 때마다 직접 업데이트를 확인해야 새 배포가 닿는다.
+  let regRef = null;
+  const check = () => { if (regRef) regRef.update().catch(() => {}); };
+  window.addEventListener('load', () => {
+    navigator.serviceWorker.register('./sw.js?v=6', { updateViaCache: 'none' })
+      .then((reg) => { regRef = reg; check(); })
+      .catch(() => {});
+  });
+  document.addEventListener('visibilitychange', () => {
+    if (document.visibilityState === 'visible') check();
+  });
+
+  // 새 워커가 이 페이지를 넘겨받으면 화면 코드는 여전히 옛것이다.
+  // 문서를 보고 있지 않으면 바로 다시 불러오고, 보고 있으면 분석을 날리지 않도록 묻는다.
+  const hadController = !!navigator.serviceWorker.controller;
+  let reloaded = false;
+  navigator.serviceWorker.addEventListener('controllerchange', () => {
+    if (!hadController || reloaded) return;      // 첫 설치는 새 버전이 아니다
+    if (!DATA) { reloaded = true; location.reload(); return; }
+    const b = document.getElementById('updBanner');
+    b.hidden = false;
+    b.onclick = () => { reloaded = true; location.reload(); };
+  });
+}
+
+const intake = document.getElementById('intake');
+['dragenter', 'dragover'].forEach((ev) => intake.addEventListener(ev, (e) => {
+  e.preventDefault(); intake.classList.add('drag');
+}));
+['dragleave', 'drop'].forEach((ev) => intake.addEventListener(ev, (e) => {
+  e.preventDefault(); intake.classList.remove('drag');
+}));
+intake.addEventListener('drop', (e) => {
+  const f = e.dataTransfer && e.dataTransfer.files && e.dataTransfer.files[0];
+  if (f) openPdf(f);
+});
+</script>
 </body>
 </html>
