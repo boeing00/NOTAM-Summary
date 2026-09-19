@@ -48,12 +48,7 @@
      있는데 없는 것처럼 보였다. 넘치면 둘째 줄로 내려보낸다. */
   .segs{display:flex;flex-wrap:wrap;align-items:center;gap:6px;padding:10px 0}
   /* 어느 버튼도 줄어들거나 줄바꿈하지 않는다. */
-  .seg,.view,.rst{flex:0 0 auto;white-space:nowrap}
-  .seg{flex:0 0 auto;min-height:var(--tap);display:flex;align-items:center;gap:7px;
-       padding:0 15px;border-radius:11px;border:1px solid var(--line);
-       background:var(--panel);color:var(--ink2);font-size:14px;font-weight:600;cursor:pointer}
-  .seg[aria-pressed="true"]{background:var(--appl-bg);border-color:#2d5c8f;color:#cfe4ff}
-  .seg .n{font-variant-numeric:tabular-nums;opacity:.75;font-weight:500}
+  .view,.rst{flex:0 0 auto;white-space:nowrap}
 
   .intake{margin-top:18px;border:1px dashed #2c3f5e;border-radius:16px;background:var(--panel);
           padding:26px 18px;text-align:center}
@@ -196,12 +191,6 @@
            color:var(--ink3);letter-spacing:.6px;padding-bottom:16px}
   .adbox.on .adlabel{display:block}
 
-  /* 공항 뷰는 자기 필터 규칙을 화면에 적어 두므로 목록용 필터 칩을 내린다. */
-  /* 공항 뷰는 자기 필터 규칙을 화면에 적어 두므로 목록용 필터가 듣지 않는다.
-     그렇다고 **감추면 안 된다** — 버튼이 사라지면 남은 것들이 폭을 다시
-     나눠 가져 탭 줄 크기가 뷰마다 달라지고, 탭을 누를 때마다 화면이 흔들린다.
-     자리는 그대로 두고 듣지 않는다는 것만 보인다. */
-  .segs.noseg .seg{opacity:.3;pointer-events:none}
 
   /* ---- 항로 개요도 ---------------------------------------------------- */
   .imap{margin:8px 0 0;border:1px solid #1f3550;border-radius:10px;overflow:hidden;background:#0b1420}
@@ -413,7 +402,6 @@ const esc = (s) => String(s == null ? "" : s)
   .replace(/&/g, "&amp;").replace(/</g, "&lt;").replace(/>/g, "&gt;");
 
 let DATA = null;
-let filter = "all";
 
 /* Bucket order is deliberate. CRITICAL outranks shading, so an ILS outage is
    never greyed. Shading outranks every "applies to me" signal, which is the
@@ -519,14 +507,6 @@ function card(it) {
     conditionTable(it) +
     (it.reasonDetail ? '<div class="why"><h4>' + esc(it.reasonBadge || '') + '</h4>' + esc(it.reasonDetail) + '</div>' : '') +
     '<pre class="raw">' + esc(it.raw) + '</pre></div></details>';
-}
-
-function keep(it) {
-  const b = bucket(it);
-  return filter === "all" ? true
-       : filter === "hot" ? (b === "crit" || b === "calc" || b === "rev")
-       : filter === "active" ? b !== "shade"
-       : b === "shade";
 }
 
 /* Runway first: it is what closes an airport. Then the rest of the ground,
@@ -1233,17 +1213,15 @@ function render() {
             '분석 제외 — 요청 시에만 대조합니다', p(2), { excluded: true, flat: true });
 }
 
+/* 탭 줄. 뷰 단추와 초기화뿐이다.
+ *
+ * 필터 칩 네 개(중요만·음영 제외·전체·음영만)가 여기 있었는데 **아무것도 하지
+ * 않았다.** 판정 함수 keep() 이 정의만 되어 있고 호출하는 곳이 없어서, 누르면
+ * 자기 눌림 표시만 바뀌고 어느 뷰도 달라지지 않았다. 조종석에서 눌러도 안 되는
+ * 단추는 없느니만 못하다. 같이 지웠다 — filter, keep(), 공항 뷰에서 칩을
+ * 흐리게 하던 .noseg 까지. 되살릴 거라면 호출부부터 만들어야 한다. */
 function segs() {
-  const inScope = DATA.items.filter((i) => i.pkg !== 2);
-  const n = (f) => inScope.filter((it) => {
-    const b = bucket(it);
-    return f === "all" ? true : f === "hot" ? (b === "crit" || b === "calc" || b === "rev")
-         : f === "active" ? b !== "shade" : b === "shade";
-  }).length;
   document.getElementById('segs').innerHTML =
-    [["hot", "중요만"], ["active", "음영 제외"], ["all", "전체"], ["shade", "음영만"]]
-      .map(([k, t]) => '<button class="seg" data-f="' + k + '" aria-pressed="' + (k === filter) + '">' +
-        t + '<span class="n">' + n(k) + '</span></button>').join('') +
     '<span class="views">' +
       '<button class="view" data-v="report" aria-pressed="' + (view === 'report') + '">항로</button>' +
       '<button class="view" data-v="airport" aria-pressed="' + (view === 'airport') + '"' +
@@ -1262,13 +1240,6 @@ function segs() {
  * 옛 버튼의 리스너가 눌린다 — 초기화를 눌러도 아무 일도 안 일어나던 이유다.
  * #segs 자체는 교체되지 않으므로 여기 한 번만 단다. */
 document.getElementById('segs').addEventListener('click', (e) => {
-  const seg = e.target.closest('.seg');
-  if (seg) {
-    filter = seg.dataset.f; segs();
-    if (view === 'list') { render(); window.scrollTo({ top: 0, behavior: 'smooth' }); }
-    else if (view === 'report') setView('report');
-    return;
-  }
   const v = e.target.closest('.view');
   if (v) {
     if (v.hasAttribute('disabled')) return;
@@ -1740,7 +1711,7 @@ function mountAd() {
  * 되돌릴 수 없고 99쪽짜리를 다시 고르는 건 태블릿에서 여러 번 두드리는
  * 일이라 한 번 확인한다. **confirm() 은 쓰지 않는다** — 홈 화면에 추가한
  * PWA 나 임베디드 뷰에서 네이티브 대화상자가 그냥 무시되는 일이 있고, 그러면
- * 버튼이 죽은 것처럼 보인다. 버튼 자신이 묻고 한 번 더 누르면 실행한다. */
+ * 버튼이 죽은 것처럼 보인다. 버튼이 Confirm! 으로 바뀌고 한 번 더 누르면 실행한다. */
 let resetTimer = null;
 
 function disarmReset() {
@@ -1752,7 +1723,7 @@ function disarmReset() {
 function resetDoc(btn) {
   if (DATA && !resetTimer) {
     btn.classList.add('armed');
-    btn.textContent = '정말 초기화?';
+    btn.textContent = 'Confirm!';
     resetTimer = setTimeout(disarmReset, 5000);   // 지나치면 스스로 내린다
     return;
   }
@@ -1762,7 +1733,6 @@ function resetDoc(btn) {
   DATA = null;
   LAYOUT = null;
   PAGE_MARKS = null;
-  filter = 'all';
   view = 'list';
 
   ['out', 'report', 'airport', 'raw', 'segs', 'flt'].forEach((id) => {
@@ -1771,7 +1741,6 @@ function resetDoc(btn) {
   });
   ['report', 'airport', 'raw'].forEach((id) => { document.getElementById(id).hidden = true; });
   document.getElementById('out').hidden = false;
-  document.getElementById('segs').classList.remove('noseg');
 
   const f = document.getElementById('file');
   if (f) f.value = '';
@@ -1788,8 +1757,7 @@ function setView(v) {
     document.getElementById('report').hidden = (v !== 'report');
     document.getElementById('airport').hidden = (v !== 'airport');
     document.getElementById('raw').hidden = (v !== 'raw');
-    document.getElementById('segs').classList.toggle('noseg', v === 'airport');
-    document.querySelectorAll('.view').forEach((b) =>
+      document.querySelectorAll('.view').forEach((b) =>
         b.setAttribute('aria-pressed', String(b.dataset.v === v)));
     if (v === 'airport') document.getElementById('airport').innerHTML = airportReport();
     if (v === 'report') {
@@ -1848,7 +1816,7 @@ document.getElementById('file').addEventListener('change', (e) => {
 // bookmarked this page had no offline copy at all.
 // 화면에 찍는 빌드 표지. 배포할 때 sw.js 의 CACHE_NAME 과 같이 올린다 —
 // 아이패드에서 옛 버전이 떠도 조종사가 알아볼 방법이 없던 문제.
-const BUILD = 'v21 · 2026-09-20';
+const BUILD = 'v22 · 2026-09-20';
 document.getElementById('buildTag').textContent = BUILD;
 mountAd();
 
