@@ -43,8 +43,12 @@
   .flt{display:flex;align-items:baseline;gap:10px;flex-wrap:wrap;min-height:26px}
   .flt b{font-size:19px;letter-spacing:.3px}
   .flt span{color:var(--ink2);font-size:13px;font-variant-numeric:tabular-nums}
-  .segs{display:flex;gap:6px;overflow-x:auto;padding:10px 0;scrollbar-width:none}
-  .segs::-webkit-scrollbar{display:none}
+  /* 가로 스크롤 대신 줄을 넘긴다. 스크롤이면 폭이 모자랄 때 버튼이 눌려
+     찌그러지고 한글이 한 자씩 세로로 쌓인다 — "항/로", "초/기/화". 화면에
+     있는데 없는 것처럼 보였다. 넘치면 둘째 줄로 내려보낸다. */
+  .segs{display:flex;flex-wrap:wrap;align-items:center;gap:6px;padding:10px 0}
+  /* 어느 버튼도 줄어들거나 줄바꿈하지 않는다. */
+  .seg,.view,.rst{flex:0 0 auto;white-space:nowrap}
   .seg{flex:0 0 auto;min-height:var(--tap);display:flex;align-items:center;gap:7px;
        padding:0 15px;border-radius:11px;border:1px solid var(--line);
        background:var(--panel);color:var(--ink2);font-size:14px;font-weight:600;cursor:pointer}
@@ -193,7 +197,11 @@
   .adbox.on .adlabel{display:block}
 
   /* 공항 뷰는 자기 필터 규칙을 화면에 적어 두므로 목록용 필터 칩을 내린다. */
-  .segs.noseg .seg{display:none}
+  /* 공항 뷰는 자기 필터 규칙을 화면에 적어 두므로 목록용 필터가 듣지 않는다.
+     그렇다고 **감추면 안 된다** — 버튼이 사라지면 남은 것들이 폭을 다시
+     나눠 가져 탭 줄 크기가 뷰마다 달라지고, 탭을 누를 때마다 화면이 흔들린다.
+     자리는 그대로 두고 듣지 않는다는 것만 보인다. */
+  .segs.noseg .seg{opacity:.3;pointer-events:none}
 
   /* ---- 항로 개요도 ---------------------------------------------------- */
   .imap{margin:8px 0 0;border:1px solid #1f3550;border-radius:10px;overflow:hidden;background:#0b1420}
@@ -320,6 +328,8 @@
   .rst{min-height:36px;display:flex;align-items:center;padding:0 13px;border-radius:9px;
        margin-left:10px;border:1px solid #4a3040;background:#25141b;color:#ffa8a8;
        font-size:13.5px;font-weight:600;cursor:pointer}
+  /* 한 번 더 누르면 실행. 묻는 동안은 눈에 띄게. */
+  .rst.armed{background:var(--crit);border-color:var(--crit);color:#2a0b0e}
   #raw{margin-top:16px}
   .pg{position:relative;margin:0 auto 14px;background:#fff;border-radius:6px;overflow:hidden;
       box-shadow:0 2px 14px rgba(0,0,0,.5)}
@@ -1245,18 +1255,30 @@ function segs() {
         (LAYOUT ? '' : ' disabled title="PDF를 열었을 때만 됩니다"') + '>원문 PDF</button>' +
       '<button class="rst" id="resetDoc" title="열어 둔 문서를 닫고 처음 화면으로 돌아갑니다">초기화</button>' +
     '</span>';
-  document.getElementById('resetDoc').addEventListener('click', resetDoc);
-  document.querySelectorAll('.seg').forEach((b) => b.addEventListener('click', () => {
-    filter = b.dataset.f; segs();
+}
+
+/* 탭 줄은 필터를 누를 때마다 innerHTML 째로 다시 그려진다. 그때마다 버튼마다
+ * 리스너를 새로 달고 있었는데, 다시 그리는 것과 누르는 것이 겹치면 이미 교체된
+ * 옛 버튼의 리스너가 눌린다 — 초기화를 눌러도 아무 일도 안 일어나던 이유다.
+ * #segs 자체는 교체되지 않으므로 여기 한 번만 단다. */
+document.getElementById('segs').addEventListener('click', (e) => {
+  const seg = e.target.closest('.seg');
+  if (seg) {
+    filter = seg.dataset.f; segs();
     if (view === 'list') { render(); window.scrollTo({ top: 0, behavior: 'smooth' }); }
     else if (view === 'report') setView('report');
-  }));
-  document.querySelectorAll('.view').forEach((b) => b.addEventListener('click', () => {
-    if (b.hasAttribute('disabled')) return;
-    setView(b.dataset.v);
+    return;
+  }
+  const v = e.target.closest('.view');
+  if (v) {
+    if (v.hasAttribute('disabled')) return;
+    setView(v.dataset.v);
     window.scrollTo({ top: 0, behavior: 'smooth' });
-  }));
-}
+    return;
+  }
+  const r = e.target.closest('.rst');
+  if (r) resetDoc(r);
+});
 
 function header(name) {
   const w = DATA.window;
@@ -1716,9 +1738,25 @@ function mountAd() {
  * 같은 파일을 다시 고를 수 있다(change 이벤트가 안 난다).
  *
  * 되돌릴 수 없고 99쪽짜리를 다시 고르는 건 태블릿에서 여러 번 두드리는
- * 일이라 한 번 묻는다. */
-function resetDoc() {
-  if (DATA && !confirm('열어 둔 문서를 닫고 처음 화면으로 돌아갑니다. 분석 결과는 사라집니다.')) return;
+ * 일이라 한 번 확인한다. **confirm() 은 쓰지 않는다** — 홈 화면에 추가한
+ * PWA 나 임베디드 뷰에서 네이티브 대화상자가 그냥 무시되는 일이 있고, 그러면
+ * 버튼이 죽은 것처럼 보인다. 버튼 자신이 묻고 한 번 더 누르면 실행한다. */
+let resetTimer = null;
+
+function disarmReset() {
+  if (resetTimer) { clearTimeout(resetTimer); resetTimer = null; }
+  const b = document.getElementById('resetDoc');
+  if (b) { b.classList.remove('armed'); b.textContent = '초기화'; }
+}
+
+function resetDoc(btn) {
+  if (DATA && !resetTimer) {
+    btn.classList.add('armed');
+    btn.textContent = '정말 초기화?';
+    resetTimer = setTimeout(disarmReset, 5000);   // 지나치면 스스로 내린다
+    return;
+  }
+  disarmReset();
 
   if (pageObserver) { pageObserver.disconnect(); pageObserver = null; }
   DATA = null;
@@ -1810,7 +1848,7 @@ document.getElementById('file').addEventListener('change', (e) => {
 // bookmarked this page had no offline copy at all.
 // 화면에 찍는 빌드 표지. 배포할 때 sw.js 의 CACHE_NAME 과 같이 올린다 —
 // 아이패드에서 옛 버전이 떠도 조종사가 알아볼 방법이 없던 문제.
-const BUILD = 'v20 · 2026-09-20';
+const BUILD = 'v21 · 2026-09-20';
 document.getElementById('buildTag').textContent = BUILD;
 mountAd();
 
