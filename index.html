@@ -160,6 +160,12 @@
   .agrp>h3 .role.dep{background:#123021;color:#8ef0bd}
   .agrp>h3 .role.alt{background:#2a2438;color:#c3b0ff}
   .agrp>.rlead{margin-bottom:12px}
+  /* 유효기간 옆의 "언제 거기 있나". 계산값이므로 본문보다 낮춰 쓴다. */
+  .eta{color:var(--ink3)}
+  .eta i{font-style:normal;font-size:11.5px}
+  .eta b{font-weight:700}
+  .eta b.warn{color:#ffd490}
+  .eta b.calc{color:#8ef0bd}
   .anone{padding-left:14px;border-left:2px solid #1c2a3d;color:var(--ink3);
          font-size:13px;line-height:1.6;margin-bottom:18px}
   .adrop{margin:0 0 22px;border:1px solid #223247;border-radius:10px;
@@ -1456,7 +1462,95 @@ function aptImpact(it) {
   return out.join('');
 }
 
+/* 이 공항에 있을 시각. 출발공항은 이륙이고 도착공항은 착륙이다.
+ *
+ * 출발은 DOF + 13항 EOBT(ctx.baseMs). 도착은 거기에 OFP 웨이포인트 표의
+ * 마지막 누적시각을 더한 것이고, 표가 없으면 16항 EET 로 떨어진다 — 어느
+ * 쪽으로 쟀는지 화면에 적는다. AAR223 에서 둘은 899분과 14:59 로 일치한다.
+ *
+ * 교체공항에는 시각이 없다. 계획상 가지 않는 곳이고, 지어내지 않는다. */
+function aptEta(role) {
+  const base = DATA.baseMs;
+  if (!base) return null;
+  if (role.key === 'dep') return { ms: base, ko: '출발 예정', src: null };
+  if (role.key === 'dest') {
+    const pts = (DATA.track && DATA.track.pts) || [];
+    const last = pts.length ? pts[pts.length - 1] : null;
+    if (last && DATA.fpl && last.name === DATA.fpl.dest && typeof last.min === 'number') {
+      return { ms: base + last.min * 60000, ko: '도착 예정', src: null };
+    }
+    const eet = DATA.fpl && DATA.fpl.eet;
+    if (/^\d{4}$/.test(eet || '')) {
+      return { ms: base + ((+eet.slice(0, 2)) * 60 + (+eet.slice(2))) * 60000,
+               ko: '도착 예정', src: 'EET 추정' };
+    }
+  }
+  return null;
+}
+
+/* 그 시각에 이 고시가 발효 중인가. 유효기간 두 끝과 시각 하나를 비교하는
+   산술이고, 절대 규칙이 단정을 허락하는 종류다. */
+function aptForce(it, eta) {
+  if (!eta) return null;
+  const parts = String(it.valid || '').split('~');
+  const from = parseNotamStamp(parts[0]);
+  if (!from) return null;                       // 읽지 못한 것은 판정하지 않는다
+  const toRaw = (parts[1] || '').trim();
+  const perm = /^(UFN|PERM)/i.test(toRaw);
+  const to = perm ? null : parseNotamStamp(toRaw);
+
+  const DAY = 24 * 60 * 60000, NEAR = 2 * 60 * 60000;
+
+  // 발효 전과 종료 후는 다른 사실이다 — 하나는 지연으로 움직이고 하나는
+  // 영영 안 움직인다. 이 구분은 항로상 passage 판정이 쓰는 것과 같다.
+  if (eta.ms < from.getTime()) {
+    const d = from.getTime() - eta.ms;
+    return { k: 'warn', t: '발효 ' + aptDur(d) + ' 전에 통과' +
+      (d < NEAR ? ' — 지연되면 걸린다' : '') };
+  }
+  if (!perm && to && eta.ms > to.getTime()) {
+    // 비행창과는 겹치지만 정작 우리가 갈 때는 끝나 있다. AAR202 의 KLAX
+    // 고시 12건이 이 경우다 — 13:30Z 종료, 착륙 예정 14:18Z.
+    return { k: 'calc', t: '종료 ' + aptDur(eta.ms - to.getTime()) + ' 뒤에 통과' };
+  }
+  if (perm || !to) return { k: '', t: '발효 중 · 종료 미정' };
+
+  // 여유는 아슬아슬할 때만 신호다. 203일 남았다는 말은 "발효 중"에 아무것도
+  // 보태지 않으면서 정작 39분 남은 줄을 묻는다.
+  const left = to.getTime() - eta.ms;
+  if (left < NEAR) return { k: 'warn', t: '발효 중 · 종료까지 ' + aptDur(left) };
+  if (left < DAY) return { k: '', t: '발효 중 · 종료까지 ' + aptDur(left) };
+  return { k: '', t: '발효 중' };
+}
+
+function aptDur(ms) {
+  const m = Math.round(ms / 60000);
+  if (m < 120) return m + '분';
+  const h = Math.round(m / 60);
+  if (h < 48) return h + '시간';
+  return Math.round(h / 24) + '일';
+}
+
+/* 유효기간 옆에 붙는 "그래서 우리는 언제 거기 있나" 한 줄.
+ *
+ * xc.passage 가 있으면 내놓지 않는다. 그건 항로상 최근접점에서 잰 더 정밀한
+ * 같은 질문이고, 한 고시에 시계가 둘 보이면 모순으로 읽힌다 — FIR 일일창
+ * 판정을 passage 뒤로 감추는 것과 같은 이유다. */
+function aptEtaLine(it, eta) {
+  if (!eta || it.xc.passage) return '';
+  const t = new Date(eta.ms);
+  const hhmmz = String(t.getUTCHours()).padStart(2, '0') +
+                String(t.getUTCMinutes()).padStart(2, '0') + 'Z';
+  const f = aptForce(it, eta);
+  return '<span class="eta"> · ' + esc(eta.ko + ' ' + hhmmz) +
+    (eta.src ? ' <i>(' + esc(eta.src) + ')</i>' : '') +
+    (f ? '<b class="' + f.k + '"> — ' + esc(f.t) + '</b>' : '') + '</span>';
+}
+
 function aptItem(it) {
+  // 역할에서 나오므로 항목 하나로 정해진다. 접힌 목록은 공항이 섞여 있어
+  // 바깥에서 하나를 물려받으면 안 된다.
+  const eta = aptEta(aptRole(it.station));
   const b = bucket(it);
   const pg = pageOf(it);
   const tags = [it.categoryKo, it.subjectLabel].filter(Boolean).join(' · ');
@@ -1465,7 +1559,7 @@ function aptItem(it) {
       (b === 'crit' ? ' <span class="rc">운항 직결 필수</span>' : '') +
       ' <span class="rid">' + esc(it.id) + (tags ? ' · ' + esc(tags) : '') +
       (pg ? ' · ' + pg + '쪽' : '') + '</span></div>' +
-    '<div class="rr"><span>유효</span><div>' + esc(it.valid) +
+    '<div class="rr"><span>유효</span><div>' + esc(it.valid) + aptEtaLine(it, eta) +
       (it.xc.timeState === 'UNKNOWN'
         ? ' <i>— 유효기간을 읽지 못해 시간대로 접지 않았습니다</i>' : '') +
       '</div></div>' +
@@ -1516,19 +1610,25 @@ function airportReport() {
     items.forEach((it) => { if (it.categoryKo) cats[it.categoryKo] = (cats[it.categoryKo] || 0) + 1; });
     const tally = Object.entries(cats).sort((a, b) => b[1] - a[1])
       .map(([k, v]) => k + ' ' + v + '건').join(', ');
+    const eta = aptEta(g.role);
+    const when = eta
+      ? new Date(eta.ms).toISOString().slice(11, 16).replace(':', '') + 'Z'
+      : null;
     return '<div class="agrp">' +
       '<h3><span class="no">' + (i + 1) + '.</span> ' + esc(g.station) +
         ' <span class="role ' + g.role.key + '">' + esc(g.role.ko) + '</span></h3>' +
       '<div class="rlead">' + (tally || '분류 없음') +
-        (st.critical ? ' · <b>운항 직결 필수 ' + st.critical + '건</b>' : '') + '</div>' +
-      items.map(aptItem).join('') +
+        (st.critical ? ' · <b>운항 직결 필수 ' + st.critical + '건</b>' : '') +
+        (when ? ' · ' + esc(eta.ko + ' ' + when) + (eta.src ? ' (' + esc(eta.src) + ')' : '')
+              : ' · <i>계획상 진입하지 않는 공항이라 예정 시각이 없습니다</i>') + '</div>' +
+      items.map((it) => aptItem(it)).join('') +
     '</div>';
   }).join('');
 
   const drop = (arr, title, why) => arr.length
     ? '<details class="adrop"><summary>' + esc(title) + ' ' + arr.length + '건' +
       ' <span class="why">' + esc(why) + '</span></summary>' +
-      '<div class="adropbody">' + arr.map(aptItem).join('') + '</div></details>'
+      '<div class="adropbody">' + arr.map((it) => aptItem(it)).join('') + '</div></details>'
     : '';
 
   const tot = summariseItems(live);
@@ -1680,7 +1780,7 @@ document.getElementById('s202').addEventListener('click', () => {
 // bookmarked this page had no offline copy at all.
 // 화면에 찍는 빌드 표지. 배포할 때 sw.js 의 CACHE_NAME 과 같이 올린다 —
 // 아이패드에서 옛 버전이 떠도 조종사가 알아볼 방법이 없던 문제.
-const BUILD = 'v18 · 2026-09-20';
+const BUILD = 'v19 · 2026-09-20';
 document.getElementById('buildTag').textContent = BUILD;
 mountAd();
 
