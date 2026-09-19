@@ -1,0 +1,7 @@
+# 회귀 하네스 출력 (scripts/README.md). 스냅샷은 대조용 임시 파일이다.
+before.json
+after.json
+*.snapshot.json
+
+# 구문 검사 recipe 가 만드는 임시 파일
+chk.js

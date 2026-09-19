@@ -21,6 +21,7 @@ curl -s "https://boeing00.github.io/NOTAM-Summary/desktop.html?cb=$RANDOM" | gre
 | `coastline.js` | 해안선 좌표(Natural Earth 1:50m, 퍼블릭 도메인). 위치도 배경 |
 | `aar223_text.js` / `aar202_text.js` | 번들 샘플. OFP 원문 전체를 JS 문자열 하나로 담고 있음 |
 | `sw.js`, `manifest.json` | PWA |
+| `scripts/` | 회귀 하네스. 엔진을 고치면 돌린다. `scripts/README.md` |
 | `python_cli/` | 별개의 파이썬 CLI. 앱과 공유 코드 없음 |
 
 빌드 단계는 없다. 엔진은 평범한 `<script src>`로 로드되어 전역을 정의하고,
@@ -40,6 +41,26 @@ io.open('chk.js','w',encoding='utf-8',newline='\n').write(re.findall(r'<script>(
 엔진 분리는 **동작이 바뀌면 안 되는 순수 이동**이었다. 회귀 하네스로 4편 PDF ×
 flat/lines 8회를 전후 대조해 바이트 단위 동일을 확인했다. 엔진을 다시 옮길 일이
 있으면 같은 방식으로 증명할 것.
+
+**엔진을 고치면 `scripts/` 를 돌린다.** 번들 샘플 826건 전수 스냅샷을 전후 대조하고,
+불변식 5종을 검사한다. 자세한 것은 `scripts/README.md`.
+
+```bash
+node scripts/snapshot.js before.json
+#   ... 엔진을 고친다 ...
+node scripts/snapshot.js after.json
+node scripts/compare.js before.json after.json   # 바뀐 항목 = 검토 대상
+node scripts/audit.js                            # 위반 = 버그
+```
+
+`compare` 가 내놓는 변경 목록과 건수를 **커밋 본문에 적는다.** "826건 중 변경 2건,
+분류·음영은 한 건도 안 움직였다"가 리팩터가 무해했다는 증명이고, 그게 다음 사람이
+재검증 없이 읽을 수 있는 유일한 형태다.
+
+**단 번들 샘플은 업로드 경로를 재현하지 못한다.** 줄 앵커·PDF 텍스트 조립·좌표 추출을
+건드렸다면 실 PDF 4편을 브라우저로 따로 확인할 것 — 한때 `parseOfpWaypoints`·
+`parseCdrTable`·`parseDailyWindow` 가 프로덕션에서 통째로 죽어 있었는데도 데모는
+멀쩡했다.
 
 ## 절대 규칙
 
