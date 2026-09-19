@@ -47,7 +47,7 @@ const CHECKS = [
     },
     {
         name: '음영 처리된 항목은 CRITICAL 이 아니다',
-        why: '운항 직결 필수는 절대 음영 불가 대상이다.',
+        why: 'Important(CRITICAL)는 절대 음영 불가 대상이다.',
         bad: (n) => n.autoShaded && n.reasonCategory === 'CRITICAL'
     }
 ];

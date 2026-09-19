@@ -144,8 +144,8 @@
                 return { 
                     isShaded: false, 
                     reasonCategory: "CRITICAL", 
-                    reasonBadge: "🔴 운항 직결 필수", 
-                    reasonDetail: "활주로 폐쇄, ILS/GP 결함, 화산재, 기종 한계 등 안전 운항 직결 필수 NOTAM으로 절대 음영 불가 대상입니다." 
+                    reasonBadge: "🔴 Important", 
+                    reasonDetail: "활주로 폐쇄, ILS/GP 결함, 화산재, 기종 한계 등 안전 운항에 직결되는 NOTAM으로 절대 음영 불가 대상입니다." 
                 };
             }
 

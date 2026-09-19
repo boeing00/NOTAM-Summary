@@ -40,7 +40,11 @@ function snapshot(text) {
         shaded: n.autoShaded,
         cat: n.categoryKey,
         subj: n.subjectLabel,
-        ko: n.koreanExplanation
+        ko: n.koreanExplanation,
+        // 화면에 그대로 찍히는 엔진 산출물이다. 빠뜨리면 문구를 바꿔도
+        // compare 가 "변경 0건"이라고 답한다 — 실제로 한 번 놓칠 뻔했다.
+        badge: n.reasonBadge,
+        detail: n.reasonDetail
     }));
 }
 

@@ -1,4 +1,4 @@
-const CACHE_NAME = 'notam-efb-v19';
+const CACHE_NAME = 'notam-efb-v20';
 
 /* 기내에서 이게 없으면 앱이 아니라 빈 화면이다.
  *
@@ -13,7 +13,7 @@ const CACHE_NAME = 'notam-efb-v19';
 const CORE = [
   './',
   './index.html',
-  './notam_engine.js?v=3.5',
+  './notam_engine.js?v=3.6',
   './coastline.js?v=2',
   './vendor/pdf.min.js?v=3.11.174',
   './vendor/pdf.worker.min.js?v=3.11.174',
@@ -74,35 +74,54 @@ async function fetchForCache(u) {
   }
 }
 
+/** CORE 를 채우고 페이지가 읽을 목록을 남긴다. 설치와 활성 양쪽이 쓴다. */
+async function populate(why) {
+  const cache = await caches.open(CACHE_NAME);
+  const coreFailed = await cacheEach(cache, CORE);
+  // 선택 자산은 결과를 보지 않는다. 실패해도 설치는 성공이다.
+  cacheEach(cache, OPTIONAL).catch(() => {});
+  await cache.put(CORE_MANIFEST, new Response(JSON.stringify({
+    core: CORE,
+    failedAtInstall: coreFailed,
+    installedAt: new Date().toISOString(),
+    cache: CACHE_NAME,
+    filledBy: why
+  }), { headers: { 'Content-Type': 'application/json' } }));
+  return coreFailed;
+}
+
 self.addEventListener('install', (e) => {
   self.skipWaiting();
-  e.waitUntil((async () => {
-    const cache = await caches.open(CACHE_NAME);
-    const coreFailed = await cacheEach(cache, CORE);
-    // 선택 자산은 결과를 보지 않는다. 실패해도 설치는 성공이다.
-    cacheEach(cache, OPTIONAL).catch(() => {});
-
-    // 페이지가 읽을 목록. 실패분까지 같이 적어 두면 첫 설치가 어땠는지
-    // 나중에도 알 수 있다 — 다만 판정은 페이지가 실물을 보고 한다.
-    await cache.put(CORE_MANIFEST, new Response(JSON.stringify({
-      core: CORE,
-      failedAtInstall: coreFailed,
-      installedAt: new Date().toISOString(),
-      cache: CACHE_NAME
-    }), { headers: { 'Content-Type': 'application/json' } }));
-  })());
+  e.waitUntil(populate('install'));
 });
 
 self.addEventListener('activate', (e) => {
-  e.waitUntil(
-    caches.keys().then((keys) => {
-      return Promise.all(
-        keys.map((k) => {
-          if (k !== CACHE_NAME) return caches.delete(k);
-        })
-      );
-    }).then(() => self.clients.claim())
-  );
+  e.waitUntil((async () => {
+    const keys = await caches.keys();
+    await Promise.all(keys.map((k) => (k !== CACHE_NAME ? caches.delete(k) : null)));
+
+    // 설치가 채워 놓았으면 할 일이 없다. 아니면 여기서 채운다.
+    const cache = await caches.open(CACHE_NAME);
+    if (!(await cache.match(CORE_MANIFEST))) await populate('activate');
+
+    await self.clients.claim();
+  })());
+});
+
+/* install 은 워커 버전당 한 번만 돈다. 그래서 이미 설치·활성된 워커 아래에서
+ * 캐시가 사라지면 — 저장공간 압박으로 브라우저가 비우는 일이 태블릿에서 실제로
+ * 일어난다 — 스크립트가 바뀌기 전까지 아무도 다시 채우지 않는다. 등록은 멀쩡하고
+ * 화면도 뜨는데 기내 사본만 없는, 이 앱이 제일 경계하는 그 상태다.
+ *
+ * 그래서 페이지가 채워 달라고 할 수 있게 열어 둔다. 판정은 페이지가 실물을 보고
+ * 하므로(checkOfflineReady), 없다고 본 쪽이 요청한다. */
+self.addEventListener('message', (e) => {
+  if (!e.data || e.data.type !== 'refill') return;
+  e.waitUntil((async () => {
+    const failed = await populate('message');
+    (e.source ? [e.source] : await self.clients.matchAll())
+      .forEach((c) => c.postMessage({ type: 'refilled', failed }));
+  })());
 });
 
 // Network-first so a reload picks up new code, but with a deadline: this is

@@ -8,7 +8,7 @@
  */
 const fs = require('fs');
 
-const FIELDS = ['pkg', 'reason', 'shaded', 'cat', 'subj', 'ko'];
+const FIELDS = ['pkg', 'reason', 'shaded', 'cat', 'subj', 'ko', 'badge', 'detail'];
 
 function compare(A, B) {
     let total = 0, changed = 0;
