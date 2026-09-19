@@ -4,7 +4,7 @@ const ASSETS = [
   './index.html',
   './desktop.html',
   './coastline.js?v=2',
-  './notam_engine.js?v=3.4',
+  './notam_engine.js?v=3.5',
   './aar223_text.js?v=2.6',
   './aar202_text.js?v=2.6',
   './manifest.json',

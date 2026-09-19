@@ -101,6 +101,22 @@
         /**
          * Determines if a NOTAM should be auto-shaded and generates a detailed Korean operational rationale.
          */
+        /**
+         * Is the E) clause about a taxiway?
+         *
+         * A taxiway NOTAM names runways to say where it is - "TWY FB BTN RWY
+         * 04L/22R AND RWY 04R/22L CLSD" closes TWY FB, and both runways in it
+         * are open. Any rule that recognises a runway by a designator appearing
+         * somewhere in the text has to ask this first.
+         *
+         * It lived inline in the CRITICAL test below and nowhere else, so the
+         * shading scored these correctly while the Korean sentence printed
+         * under them announced a full runway closure. One rule, one place.
+         */
+        function clauseIsTaxiway(upper) {
+            return /\bE\)\s*(?:[A-Z]{3,4}\s+)?(?:TWY|TAXIWAY|TXL)\b/.test(upper);
+        }
+
         function evaluateAutoShading(raw, station, fplRoute) {
             const upper = raw.toUpperCase();
 
@@ -117,7 +133,7 @@
                     // RWY 04L/22R AND RWY 04R/22L CLSD" closes TWY FB and names
                     // the runways only to say where it is. A clause opening with
                     // TWY is about that taxiway, whatever it mentions after.
-                    !/\bE\)\s*(?:[A-Z]{3,4}\s+)?(?:TWY|TAXIWAY|TXL)\b/.test(upper)) ||
+                    !clauseIsTaxiway(upper)) ||
                 (/\b(ILS|LOC|GP|GLIDE PATH)\b/.test(upper) && /\b(U\/S|OTS|OUT OF SERVICE)\b/.test(upper)) ||
                 upper.includes("VOLCANIC") || upper.includes("ASH") || upper.includes("KLYUCHEVSKOY") ||
                 upper.includes("WINGSPAN GREATER THAN 213FT") || upper.includes("WINGSPAN MORE THAN 118FT") ||
@@ -287,25 +303,37 @@
             }
 
             // 2. Runway Specific Closures & Restrictions
-            if (u.includes("RWY 04R/22L CLSD")) {
-                return "뉴욕 JFK 공항 활주로 04R/22L 전면 폐쇄 고시 (공사/정비로 인한 이륙 및 착륙 불가).";
-            }
-            if (u.includes("RWY 04L/22R CLSD")) {
-                return "뉴욕 JFK 공항 활주로 04L/22R 전면 폐쇄 고시 (교차 활주로 동시 폐쇄로 이륙 활주로 31L/13R 집중 및 지상 대기 지연 예상).";
-            }
-            if (u.includes("RWY 14L/32R CLSD")) {
-                return "김포공항(RKSS) 활주로 14L/32R 심야 공사(1400-2000Z) 폐쇄 고시 (회항 착륙 시 14R/32L 단일 활주로 착륙).";
-            }
-            if (u.includes("RWY 15L/33R CLSD")) {
-                return "인천공항(RKSI) 활주로 15L/33R 노면 포장 보수 공사로 인한 전면 폐쇄 고시.";
-            }
-            if (u.includes("RWY 07L/25R CLSD")) {
-                return "로스앤젤레스(KLAX) 북측 주 활주로 07L/25R 포장 보수 공사로 인한 전면 폐쇄 고시.";
-            }
-            
-            const mRwyClsd = u.match(/\b(?:RWY|RUNWAY)\s+(\d{1,2}[LCR]?(?:\/\d{1,2}[LCR]?)?)\s+(?:CLSD|CLOSED|NOT AVBL)/);
-            if (mRwyClsd) {
-                return `${station} 활주로 RWY ${mRwyClsd[1]} 전면 폐쇄 고시 (공사 및 정비로 인한 이착륙 불가).`;
+            //
+            // Every rule here recognises a runway by a designator appearing
+            // somewhere in the text, and a taxiway NOTAM names runways only to
+            // say where it is. "TWY FB BTN RWY 04L/22R AND RWY 04R/22L CLSD"
+            // closes TWY FB - read as a runway rule it announced a full closure
+            // of two runways that were open, on the departure airport summary.
+            // evaluateAutoShading() already asked this question and so scored
+            // these correctly; the sentence printed under them did not.
+            // Guarded, they fall through to the taxiway rules in section 4,
+            // which name the right thing.
+            if (!clauseIsTaxiway(u)) {
+                if (u.includes("RWY 04R/22L CLSD")) {
+                    return "뉴욕 JFK 공항 활주로 04R/22L 전면 폐쇄 고시 (공사/정비로 인한 이륙 및 착륙 불가).";
+                }
+                if (u.includes("RWY 04L/22R CLSD")) {
+                    return "뉴욕 JFK 공항 활주로 04L/22R 전면 폐쇄 고시 (교차 활주로 동시 폐쇄로 이륙 활주로 31L/13R 집중 및 지상 대기 지연 예상).";
+                }
+                if (u.includes("RWY 14L/32R CLSD")) {
+                    return "김포공항(RKSS) 활주로 14L/32R 심야 공사(1400-2000Z) 폐쇄 고시 (회항 착륙 시 14R/32L 단일 활주로 착륙).";
+                }
+                if (u.includes("RWY 15L/33R CLSD")) {
+                    return "인천공항(RKSI) 활주로 15L/33R 노면 포장 보수 공사로 인한 전면 폐쇄 고시.";
+                }
+                if (u.includes("RWY 07L/25R CLSD")) {
+                    return "로스앤젤레스(KLAX) 북측 주 활주로 07L/25R 포장 보수 공사로 인한 전면 폐쇄 고시.";
+                }
+
+                const mRwyClsd = u.match(/\b(?:RWY|RUNWAY)\s+(\d{1,2}[LCR]?(?:\/\d{1,2}[LCR]?)?)\s+(?:CLSD|CLOSED|NOT AVBL)/);
+                if (mRwyClsd) {
+                    return `${station} 활주로 RWY ${mRwyClsd[1]} 전면 폐쇄 고시 (공사 및 정비로 인한 이착륙 불가).`;
+                }
             }
 
             // 3. Wingspan & Code limits (A380 / Code F)
