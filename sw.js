@@ -1,4 +1,4 @@
-const CACHE_NAME = 'notam-efb-v16';
+const CACHE_NAME = 'notam-efb-v17';
 const ASSETS = [
   './',
   './index.html',
