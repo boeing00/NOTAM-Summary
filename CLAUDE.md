@@ -21,6 +21,7 @@ curl -s "https://boeing00.github.io/NOTAM-Summary/desktop.html?cb=$RANDOM" | gre
 | `coastline.js` | 해안선 좌표(Natural Earth 1:50m, 퍼블릭 도메인). 위치도 배경 |
 | `aar223_text.js` / `aar202_text.js` | 번들 샘플. OFP 원문 전체를 JS 문자열 하나로 담고 있음 |
 | `sw.js`, `manifest.json` | PWA |
+| `vendor/` | pdf.js 3.11.174 (Apache-2.0). 기내에서 CDN 을 못 쓰므로 내장한다 |
 | `scripts/` | 회귀 하네스. 엔진을 고치면 돌린다. `scripts/README.md` |
 | `python_cli/` | 별개의 파이썬 CLI. 앱과 공유 코드 없음 |
 
@@ -462,6 +463,30 @@ CDN 파일은 버전 고정이고 기내 와이파이에서 재다운로드가 �
 
 **엔진을 고치면 `?v=` 를 올린다.** `notam_engine.js?v=3.0`은 URL로 캐시되므로 버전을
 안 올리면 기존 사용자가 구버전 엔진을 받는다. 실제로 한 번 당했다.
+
+**오프라인 앱인데 핵심 기능이 CDN에 있었다.** 조종석 화면이 pdf.js 를 cdnjs 에서
+받고 있었다 — PDF 를 읽는 게 이 앱의 전부인데, 기내 와이파이가 없으면 그 한 파일이
+없어서 아무것도 못 했다. 홈 화면 아이콘도 있고 화면도 뜨니 **설치된 것처럼 보이면서**
+그랬다. `vendor/` 에 내장했다(3.11.174 동일 판, 본체 320KB + 워커 1.06MB). 지금
+`index.html` 의 외부 참조는 **0건**이다 — 애드핏 로더만 런타임에 붙는데 광고라 없어도 안 깨진다.
+
+**`cache.addAll` 은 원자적이다.** 하나라도 실패하면 전부 롤백되는데 그걸
+`.catch(() => {})` 로 삼키고 있었다. CDN 하나가 떨어지면 **캐시가 통째로 빈 채 설치가
+"성공"**했다. 실제로 `cdn.tailwindcss.com` 이 CORS 헤더를 안 붙여 cors 요청이 늘 실패한다 —
+그 한 건이 매번 전체를 되돌리고 있었다. 지금은 한 건씩 넣고(`cacheEach`), 교차 출처가
+CORS 로 실패하면 `no-cors` 로 다시 받아 opaque 응답을 캐시한다(`<script src>` 로는 쓸 수 있다).
+
+**`CORE` 와 `OPTIONAL` 을 가른다.** CORE 는 없으면 앱이 아닌 것들이고 전부 동일 출처다.
+OPTIONAL(데스크톱 화면·샘플·Tailwind·lucide)은 실패해도 설치가 성공한다. lucide 는
+버전을 박았다 — `@latest` 를 캐시에 넣으면 그 사본이 어느 판인지 아무도 모른다.
+
+**화면이 기내 준비 상태를 말한다** (`checkOfflineReady`). "설치됨"은 대답이 아니다.
+`sw.js` 가 캐시에 넣어 둔 `__core__` 에서 목록을 읽어 **한 건씩 실물이 있는지 본다** —
+목록을 화면에도 적으면 두 벌이 되어 갈라진다. 버전 표지 옆에 초록/주황으로 뜬다.
+
+검증은 **서버를 내리고** 했다. 그 상태에서 화면이 뜨고, 엔진·해안선·샘플이 다 살아 있고,
+즉석에서 만든 최소 PDF 를 `extractPdfLayout()` 이 읽어 텍스트를 냈다(워커까지 캐시에서
+나왔다는 뜻이다). 데스크톱 화면도 Tailwind 가 적용되고 lucide 아이콘 106개가 그려졌다.
 
 **한국어 해설기가 문구만 보고 고유명사를 하드코딩했다.** `generateKoreanExplanation`의
 규칙 다수가 NOTAM을 어구로 알아보고 답에 공항 이름을 박아 넣는다 — `RWY 15L/33R CLSD`면

@@ -1,24 +1,96 @@
-const CACHE_NAME = 'notam-efb-v17';
-const ASSETS = [
+const CACHE_NAME = 'notam-efb-v18';
+
+/* 기내에서 이게 없으면 앱이 아니라 빈 화면이다.
+ *
+ * 전부 동일 출처다. pdf.js 를 vendor/ 로 들여온 뒤로 조종석 화면(index.html)이
+ * 바깥에 의존하는 것은 하나도 없다 — 그 전에는 pdf.js 를 cdnjs 에서 받았고,
+ * 기내 와이파이가 없으면 PDF 를 한 장도 못 읽었다. 설치는 되어 있는데 정작
+ * 핵심 기능이 없는 상태다.
+ *
+ * 순서에 뜻이 있다: 목록이 곧 "무엇이 있어야 비행 준비가 된 것인가"의 정의이고,
+ * index.html 의 준비 상태 표시가 이 목록을 읽어서 실물을 확인한다(__core__).
+ * 목록이 두 군데 있으면 갈라지므로 여기 하나만 둔다. */
+const CORE = [
   './',
   './index.html',
-  './desktop.html',
-  './coastline.js?v=2',
   './notam_engine.js?v=3.5',
+  './coastline.js?v=2',
+  './vendor/pdf.min.js?v=3.11.174',
+  './vendor/pdf.worker.min.js?v=3.11.174',
+  './manifest.json'
+];
+
+/* 있으면 좋지만 없어도 조종석 화면은 돈다 — 데스크톱 화면 전용이거나 샘플이다.
+ * 여기 실패가 CORE 캐시를 망가뜨리면 안 된다(아래 cacheEach 참조).
+ *
+ * lucide 는 버전을 박았다. @latest 를 캐시에 넣으면 그 사본이 어느 판인지
+ * 아무도 모르고 재현도 안 된다. */
+const OPTIONAL = [
+  './desktop.html',
   './aar223_text.js?v=2.6',
   './aar202_text.js?v=2.6',
-  './manifest.json',
   'https://cdn.tailwindcss.com',
-  'https://unpkg.com/lucide@latest',
-  'https://cdnjs.cloudflare.com/ajax/libs/pdf.js/3.11.174/pdf.min.js',
-  'https://cdnjs.cloudflare.com/ajax/libs/pdf.js/3.11.174/pdf.worker.min.js'
+  'https://unpkg.com/lucide@1.47.0/dist/umd/lucide.min.js'
 ];
+
+/* 카카오 애드핏 로더는 일부러 넣지 않는다. 광고이고, 없어도 아무것도 안 깨진다. */
+
+/** CORE 목록을 페이지가 읽을 수 있게 캐시에 둔다. 단일 출처를 위해서다. */
+const CORE_MANIFEST = './__core__';
+
+/* cache.addAll 은 원자적이다 — 하나라도 실패하면 전부 롤백된다.
+ * 이걸 .catch(() => {}) 로 삼키고 있었다. 약한 회선에서 CDN 하나가 떨어지면
+ * 캐시가 통째로 비어 있는 채 설치가 "성공"했고, 아무도 모르는 채 기내에서
+ * 빈 화면을 봤다. 한 건씩 넣고, 실패한 것을 이름으로 남긴다. */
+async function cacheEach(cache, urls) {
+  const failed = [];
+  await Promise.all(urls.map(async (u) => {
+    try {
+      await cache.put(u, await fetchForCache(u));
+    } catch (err) {
+      failed.push(u);
+    }
+  }));
+  return failed;
+}
+
+const isSameOrigin = (u) => new URL(u, self.location.href).origin === self.location.origin;
+
+async function fetchForCache(u) {
+  try {
+    // 설치 때만큼은 HTTP 캐시를 건너뛴다. GitHub Pages 가 HTML 에
+    // max-age=600 을 붙이므로, 그냥 받으면 방금 푸시한 새 파일 대신
+    // 10분 전 사본을 캐시에 박아 넣을 수 있다.
+    const res = await fetch(new Request(u, { cache: 'reload' }));
+    if (res && res.ok) return res;
+    throw new Error('HTTP ' + (res && res.status));
+  } catch (err) {
+    // 교차 출처 CDN 이 CORS 헤더를 안 붙이면 위 요청은 실패한다 —
+    // cdn.tailwindcss.com 이 실제로 그렇다. no-cors 로 받으면 내용을 읽지는
+    // 못해도(opaque, status 0) 캐시에 넣고 <script src> 로 쓸 수는 있다.
+    // 이 한 건이 예전에 addAll 을 통째로 되돌려 캐시를 비우던 것이다.
+    if (isSameOrigin(u)) throw err;
+    return await fetch(new Request(u, { mode: 'no-cors', cache: 'reload' }));
+  }
+}
 
 self.addEventListener('install', (e) => {
   self.skipWaiting();
-  e.waitUntil(
-    caches.open(CACHE_NAME).then((cache) => cache.addAll(ASSETS).catch(() => {}))
-  );
+  e.waitUntil((async () => {
+    const cache = await caches.open(CACHE_NAME);
+    const coreFailed = await cacheEach(cache, CORE);
+    // 선택 자산은 결과를 보지 않는다. 실패해도 설치는 성공이다.
+    cacheEach(cache, OPTIONAL).catch(() => {});
+
+    // 페이지가 읽을 목록. 실패분까지 같이 적어 두면 첫 설치가 어땠는지
+    // 나중에도 알 수 있다 — 다만 판정은 페이지가 실물을 보고 한다.
+    await cache.put(CORE_MANIFEST, new Response(JSON.stringify({
+      core: CORE,
+      failedAtInstall: coreFailed,
+      installedAt: new Date().toISOString(),
+      cache: CACHE_NAME
+    }), { headers: { 'Content-Type': 'application/json' } }));
+  })());
 });
 
 self.addEventListener('activate', (e) => {

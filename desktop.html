@@ -18,9 +18,9 @@
     <!-- Tailwind CSS CDN -->
     <script src="https://cdn.tailwindcss.com"></script>
     <!-- Lucide Icons -->
-    <script src="https://unpkg.com/lucide@latest"></script>
+    <script src="https://unpkg.com/lucide@1.47.0/dist/umd/lucide.min.js"></script>
     <!-- PDF.js CDN (Mozilla) -->
-    <script src="https://cdnjs.cloudflare.com/ajax/libs/pdf.js/3.11.174/pdf.min.js"></script>
+    <script src="./vendor/pdf.min.js?v=3.11.174"></script>
     <!-- Pre-bundled Full Flight Datasets for Instant Preview -->
     <script src="./aar223_text.js?v=2.6"></script>
     <script src="./aar202_text.js?v=2.6"></script>
@@ -29,7 +29,7 @@
     <script src="./notam_engine.js?v=3.5"></script>
 
     <script>
-        pdfjsLib.GlobalWorkerOptions.workerSrc = 'https://cdnjs.cloudflare.com/ajax/libs/pdf.js/3.11.174/pdf.worker.min.js';
+        pdfjsLib.GlobalWorkerOptions.workerSrc = './vendor/pdf.worker.min.js?v=3.11.174';
         tailwind.config = {
             darkMode: 'class',
             theme: {
@@ -1541,7 +1541,7 @@ E) NAV ILS RWY 26R CAT II/III NA`
 
         // PWA Service Worker Registration with automatic update
         if ('serviceWorker' in navigator) {
-            navigator.serviceWorker.register('./sw.js?v=6').then(reg => {
+            navigator.serviceWorker.register('./sw.js?v=7').then(reg => {
                 reg.update();
             }).catch(err => console.log('SW Reg:', err));
         }
