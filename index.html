@@ -1826,8 +1826,11 @@ function airportReport() {
  * 아직 애드핏 매체로 등록되지 않았고, 등록되지 않은 도메인에서 발급받지
  * 않은 광고단위를 호출하면 부정 트래픽으로 계정 전체가 정지된다.
  * ================================================================== */
-const ADFIT_UNIT = '';          /* ← 매체 등록 후 발급받은 DAN-... 를 여기에 */
-const ADFIT_W = 320, ADFIT_H = 100;
+/* 매체: NOTAM-Summary (https://boeing00.github.io/NOTAM-Summary/)
+ * 크기는 **애드핏에 등록된 규격과 같아야 한다.** 다르면 소재가 안 내려온다.
+ * 이 단위는 320×50 으로 등록돼 있다. */
+const ADFIT_UNIT = 'DAN-rJ2mkt3MBd3cBofK';
+const ADFIT_W = 320, ADFIT_H = 50;
 
 /* NO-AD 콜백. SDK 가 ins 를 display:none 으로 두므로 슬롯이 스스로 접힌다. */
 function adFitNoAd() {}
@@ -2013,7 +2016,7 @@ document.getElementById('file').addEventListener('change', (e) => {
 // bookmarked this page had no offline copy at all.
 // 화면에 찍는 빌드 표지. 배포할 때 sw.js 의 CACHE_NAME 과 같이 올린다 —
 // 아이패드에서 옛 버전이 떠도 조종사가 알아볼 방법이 없던 문제.
-const BUILD = 'v26 · 2026-09-20';
+const BUILD = 'v27 · 2026-09-20';
 document.getElementById('buildTag').textContent = BUILD;
 mountAd();
 
