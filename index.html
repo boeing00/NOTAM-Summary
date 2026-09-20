@@ -14,7 +14,7 @@
      조종석 화면이 켤 때마다 받을 이유가 없다. 파일 자체는 남는다 —
      desktop.html 이 여전히 쓰고, scripts/ 의 회귀 하네스가 이걸로 돈다. -->
 <script src="./coastline.js?v=2"></script>
-<script src="./notam_engine.js?v=3.6"></script>
+<script src="./notam_engine.js?v=3.7"></script>
 
 <style>
   :root{
@@ -58,6 +58,10 @@
   .fold>summary .why{font-weight:500;color:var(--ink3)}
   .fold[open]>summary .chev{transform:rotate(90deg)}
   .fold>.list{padding:0 10px 10px}
+  /* 목록이 전량인지 화면에서 스스로 맞춰 본 결과. 맞으면 조용하고,
+     어긋나면 몇 건이 없는지 말한다. */
+  .tally{margin:14px 0 4px;font-size:12.5px;color:var(--ink3)}
+  .tally.bad{color:#ffd490;font-weight:700}
 
   .intake{margin-top:18px;border:1px dashed #2c3f5e;border-radius:16px;background:var(--panel);
           padding:26px 18px;text-align:center}
@@ -1238,6 +1242,16 @@ function firSummary() {
 function render() {
   const d = DATA;
   const p = (n) => d.items.filter((i) => i.pkg === n);
+
+  // **어느 구획에도 안 들어간 항목**(`pkg` 0). 엔진은 구획을 못 찾으면 0 으로
+  // 보고한다 — 추측으로 메우지 않기 위해서다. 그런데 화면은 1·3·2 만 그리고
+  // 있어서 그 항목들이 **조용히 사라졌다.** 목록은 이 앱의 "전량 나열" 약속을
+  // 지키는 화면인데 그걸 구획 파싱 실패 하나로 깨뜨리는 셈이다.
+  //
+  // 실측: 샘플 2편에서는 0 건이라 지금까지 드러나지 않았다. `NOTAM PACKAGE 1`
+  // 의 공백 하나만 어긋나도 119 건이 통째로 빠진다.
+  const orphans = d.items.filter((i) => !(i.pkg >= 1 && i.pkg <= 3));
+
   document.getElementById('out').innerHTML =
     firSummary() +
     section('PACKAGE 1 · 출발 · 목적지 · 교체공항',
@@ -1245,7 +1259,31 @@ function render() {
     section('PACKAGE 3 · 항로',
             'FIR ' + d.firSeq.map((f) => f.fir).join(' → '), p(3), { open: true }) +
     section('PACKAGE 2 · 재출항 · ETP · 항로상 회항공항',
-            '분석 제외 — 요청 시에만 대조합니다', p(2), { excluded: true, flat: true });
+            '분석 제외 — 요청 시에만 대조합니다', p(2), { excluded: true, flat: true }) +
+    (orphans.length
+      ? section('구획 밖 · 어느 PACKAGE 에도 안 들어감',
+                '문서의 구획 표시를 찾지 못한 항목입니다 — 원문을 확인하십시오',
+                orphans, { open: true, flat: true })
+      : '') +
+    tallyLine(d.items.length);
+}
+
+/* 화면이 그린 카드 수와 엔진이 낸 항목 수를 화면에서 직접 맞춰 본다.
+   어긋나면 무엇을 놓쳤는지 모르는 채로 "전량"이라고 말하게 된다. */
+function tallyLine(total) {
+  return '<div class="tally" id="tally" data-total="' + total + '"></div>';
+}
+
+function checkTally() {
+  const el = document.getElementById('tally');
+  if (!el) return;
+  const total = +el.dataset.total;
+  const drawn = document.getElementById('out').querySelectorAll('details.n').length;
+  el.textContent = drawn === total
+    ? '목록에 ' + drawn + '건 — 엔진이 낸 ' + total + '건과 일치합니다.'
+    : '⚠ 목록에 ' + drawn + '건뿐입니다. 엔진은 ' + total + '건을 냈습니다 — ' +
+      (total - drawn) + '건이 화면에 없습니다.';
+  el.className = 'tally' + (drawn === total ? '' : ' bad');
 }
 
 /* 탭 줄. 뷰 단추와 초기화뿐이다.
@@ -1844,7 +1882,7 @@ function show(fullText, name, job) {
       DATA = data;
       PAGE_MARKS = null;                 // marks belong to this document only
       document.getElementById('intake').style.display = 'none';
-      header(name); segs(); render(); setView('report');
+      header(name); segs(); render(); checkTally(); setView('report');
     } catch (e) {
       if (job !== undefined && !isCurrent(job)) return;
       out.innerHTML = '<div class="err">분석에 실패했습니다: ' + esc(e && e.message) + '</div>';
@@ -1890,7 +1928,7 @@ document.getElementById('file').addEventListener('change', (e) => {
 // bookmarked this page had no offline copy at all.
 // 화면에 찍는 빌드 표지. 배포할 때 sw.js 의 CACHE_NAME 과 같이 올린다 —
 // 아이패드에서 옛 버전이 떠도 조종사가 알아볼 방법이 없던 문제.
-const BUILD = 'v24 · 2026-09-20';
+const BUILD = 'v25 · 2026-09-20';
 document.getElementById('buildTag').textContent = BUILD;
 mountAd();
 

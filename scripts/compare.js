@@ -20,7 +20,7 @@
  */
 const fs = require('fs');
 
-const FIELDS = ['pkg', 'reason', 'shaded', 'cat', 'subj', 'ko', 'badge', 'detail'];
+const FIELDS = ['pkg', 'reason', 'shaded', 'cat', 'subj', 'ko', 'badge', 'detail', 'xc'];
 
 /** 스냅샷 키는 `<위치> <STATION NUM>` 이다. 위치와 식별자를 갈라 둔다. */
 function splitKey(k) {

@@ -30,8 +30,44 @@ const SAMPLES = [
     ['AAR202', 'aar202_text.js', 'SAMPLE_AAR202_FULL_TEXT']
 ];
 
+/* 교차 대조 결과(`xc`)를 한 줄로 줄인다.
+ *
+ * **이게 없으면 판정을 바꿔도 하네스가 "변경 없음"이라고 답한다.** 실제로 두 번
+ * 당했다 — 화면에 그대로 찍히는 `reasonBadge` 를 바꿨을 때, 그리고 일일 운영시간
+ * 판정을 "판정 불가"로 바꿨을 때. 분류·음영만 보고 있으면 정작 조종사가 읽는
+ * 결론이 바뀐 것을 못 본다.
+ *
+ * 부동소수는 반올림해 담는다. 의미 없는 끝자리 차이로 매번 diff 가 나면
+ * 아무도 목록을 안 읽게 된다. */
+function xcDigest(x) {
+    if (!x) return null;
+    const r1 = (v) => (typeof v === 'number' ? Math.round(v) : v);
+    return {
+        time: x.timeState,
+        stn: x.stationMatch,
+        fir: x.firMatch,
+        review: x.needsReview,
+        relevant: x.relevant,
+        limits: (x.limits || []).join('|'),
+        route: (x.routeHits || []).join('|'),
+        geo: x.geo ? r1(x.geo.minNm) + '/' + x.geo.lateralClear + '/' + x.geo.vertClear : null,
+        zones: x.zones
+            ? ((x.zones.banned || []).length + ':' + (x.zones.gates || []).length)
+            : null,
+        pass: x.passage ? x.passage.reason + '@' + r1(x.passage.utcMin) + '/' + r1(x.passage.nm) + 'NM' : null,
+        cdr: (x.cdr || []).length,
+        cond: (x.conditions || []).map((c) => c.ref + ':' + c.verdict).join('|'),
+        // 일일 운영시간은 "안/밖"뿐 아니라 **판정했는지 여부**까지 담아야 한다.
+        daily: x.dailyCheck
+            ? (x.dailyCheck.complete ? String(x.dailyCheck.inWindow) : '판정불가')
+            : null
+    };
+}
+
 /** 한 문서의 전 항목을, 대조에 쓸 필드만 남겨서. */
 function snapshot(text) {
+    const flight = engine.analyseFlight(text);
+    const xcByIndex = flight.items.map((it) => xcDigest(it.xc));
     return engine.parseAllRawNotamsWithShading(text).map((n, i) => ({
         // NOTAM 번호는 유일하지 않다(CLAUDE.md). 위치를 키에 넣는다.
         k: i + ' ' + n.id,
@@ -44,7 +80,10 @@ function snapshot(text) {
         // 화면에 그대로 찍히는 엔진 산출물이다. 빠뜨리면 문구를 바꿔도
         // compare 가 "변경 0건"이라고 답한다 — 실제로 한 번 놓칠 뻔했다.
         badge: n.reasonBadge,
-        detail: n.reasonDetail
+        detail: n.reasonDetail,
+        // 조종사가 실제로 읽는 결론. 분류·음영이 그대로여도 이게 바뀌면
+        // 화면이 다른 말을 하고 있다는 뜻이다.
+        xc: xcByIndex[i] || null
     }));
 }
 

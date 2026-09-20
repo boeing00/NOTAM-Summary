@@ -609,7 +609,6 @@
 
         function parseAllRawNotamsWithShading(fullText) {
             const list = [];
-            const seen = new Set();
             const sections = parseNotamSections(fullText);
 
             const pkgAt = (i) => {
@@ -684,9 +683,17 @@
 
                 rawBlock = rawBlock.replace(/\n{3,}/g, "\n\n").trim();
 
+                // **번호가 같다고 버리지 않는다.** 예전에는 `station + num` 을
+                // 본 적 있으면 건너뛰었다. 그런데 이 파일이 스스로 적어둔 사실이
+                // "NOTAM ID 는 유일하지 않다" 이고, 그러면 번호가 겹치는 순간
+                // **본문이 다른 고시가 조용히 사라진다.** 전량 나열이 이 앱의
+                // 첫 약속인데 그걸 번호 하나로 깨뜨리는 셈이다.
+                //
+                // 실측: 샘플 2편에서 헤더 491·335개 전부 번호가 고유해 이 가드는
+                // 한 건도 버리지 않고 있었다. 지금 지워도 달라지는 것이 없고,
+                // 겹치는 문서가 오면 둘 다 남는다. 같은 고시가 두 번 인쇄돼
+                // 있으면 두 번 보이는 것이 문서에 충실한 것이다.
                 const id = `${cur.station} ${cur.num}`;
-                if (seen.has(id)) continue;
-                seen.add(id);
 
                 const auto = evaluateAutoShading(rawBlock, cur.station, fullText);
                 const koreanExplanation = generateKoreanExplanation(rawBlock, cur.station);
@@ -1677,9 +1684,23 @@
          * leaving them to the reader.
          */
         function parseDailyWindow(raw) {
-            const m = String(raw || "").toUpperCase().match(/^D\)\s*([^\r\n]+)/m);
-            if (!m) return null;
-            const spec = m[1].trim();
+            const up = String(raw || "").toUpperCase();
+            const start = up.search(/^D\)/m);
+            if (start < 0) return null;
+
+            // **D 절은 다음 필드 문자까지다.** 예전에는 `[^\r\n]+` 로 첫 줄만
+            // 읽었다. `RKRR E3945/26` 의
+            //     D) 23 2150-2230, 25 0000-0130 2050-2130, 27 2050-2130, 28
+            //        0800-0930
+            //        2050-2130, 29 0800-0930
+            // 은 "…, 28" 에서 잘렸고, 그렇게 창을 반쯤 읽고도 화면은
+            // "운영 시간대 밖"이라고 단정했다. 절을 통째로 읽는다.
+            // 다음 필드를 못 찾아 E 절까지 삼키더라도 아래 residue 검사가
+            // 그걸 "판정 불가"로 떨어뜨리므로, 조용히 틀리지는 않는다.
+            const rest = up.slice(start + 2);
+            const endRel = rest.search(/^\s*[EFG]\)/m);
+            const spec = (endRel < 0 ? rest : rest.slice(0, endRel)).replace(/\s+/g, " ").trim();
+
             const windows = [];
             const re = /(\d{4})\s*[-\/]\s*(\d{4})/g;
             let g;
@@ -1689,9 +1710,20 @@
                 if (a < 1440 && b < 1440) windows.push([a, b]);
             }
             if (!windows.length) return null;
-            const dayQualified = /\b(MON|TUE|WED|THU|FRI|SAT|SUN)\b/.test(spec) ||
-                /^\d{1,2}(-\d{1,2})?(\s|$)/.test(spec);
-            return { spec, windows, dayQualified };
+
+            // **시계 범위 말고 무엇이 남는가.** 남는 게 있으면 그 창이 어느 날에
+            // 걸리는지 이 파일은 모른다 — `AUG 13 2100-0200, AUG 14-SEP 03 …`
+            // 처럼 날짜 범위가 붙은 것을 예전 규칙(요일 이름과 맨 앞 숫자만
+            // 봤다)은 조건으로 알아보지도 못하고 매일로 취급했다.
+            // 남는 토큰이 하나라도 있으면 판정하지 않는다.
+            const residue = spec
+                .replace(/\d{4}\s*[-\/]\s*\d{4}/g, " ")
+                .replace(/\bDAILY\b|\bDLY\b|\bUTC\b|\bH24\b/g, " ")
+                .replace(/[,;.\-\/()]/g, " ")
+                .trim();
+            const complete = residue === "";
+
+            return { spec, windows, complete, residue };
         }
 
         /** Minutes past midnight UTC at which the flight enters `fir`. */
@@ -2196,11 +2228,17 @@
             if (daily && firMatch) {
                 const entry = firEntryMinutes(ctx.fullText, ctx.fpl, ctx.firSeq, item.station);
                 if (entry !== null) {
+                    // **절을 다 읽지 못했으면 판정하지 않는다.** 시계 범위 밖의
+                    // 토큰(날짜·요일·제외 문구)이 남아 있으면 그 창이 이 비행
+                    // 날짜에 걸리는지 알 수 없다. `inWindow: null` 은 "모른다"이고,
+                    // 화면은 안/밖 대신 판정 불가로 낸다 — 계산하지 않은 것을
+                    // 단정하지 않는 것이 이 파일의 첫 규칙이다.
                     dailyCheck = {
                         spec: daily.spec,
                         entry,
-                        inWindow: inAnyWindow(entry, daily.windows),
-                        dayQualified: daily.dayQualified
+                        inWindow: daily.complete ? inAnyWindow(entry, daily.windows) : null,
+                        complete: daily.complete,
+                        residue: daily.residue
                     };
                 }
             }

@@ -1,4 +1,4 @@
-const CACHE_NAME = 'notam-efb-v24';
+const CACHE_NAME = 'notam-efb-v25';
 
 /* 기내에서 이게 없으면 앱이 아니라 빈 화면이다.
  *
@@ -13,7 +13,7 @@ const CACHE_NAME = 'notam-efb-v24';
 const CORE = [
   './',
   './index.html',
-  './notam_engine.js?v=3.6',
+  './notam_engine.js?v=3.7',
   './coastline.js?v=2',
   './vendor/pdf.min.js?v=3.11.174',
   './vendor/pdf.worker.min.js?v=3.11.174',
