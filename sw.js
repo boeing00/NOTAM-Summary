@@ -1,4 +1,4 @@
-const CACHE_NAME = 'notam-efb-v23';
+const CACHE_NAME = 'notam-efb-v24';
 
 /* 기내에서 이게 없으면 앱이 아니라 빈 화면이다.
  *
@@ -90,19 +90,45 @@ async function populate(why) {
   return coreFailed;
 }
 
+/** CORE 가 한 건도 빠짐없이 들어 있는가. 버전을 갈아도 되는지의 유일한 기준이다. */
+async function coreComplete(cache) {
+  for (const u of CORE) if (!(await cache.match(u))) return false;
+  return true;
+}
+
 self.addEventListener('install', (e) => {
-  self.skipWaiting();
-  e.waitUntil(populate('install'));
+  e.waitUntil((async () => {
+    const failed = await populate('install');
+    if (failed.length) {
+      // 새 사본이 불완전하다. **여기서 설치를 실패시켜야** 이 워커가 버려지고
+      // 기존 워커와 그 캐시가 그대로 살아남는다.
+      //
+      // 예전에는 실패를 보지 않고 설치를 끝냈고, 뒤이은 activate 가 멀쩡한
+      // 구버전 캐시를 지웠다 — 회선이 한 번 나쁜 것만으로 기내에서 쓸 사본이
+      // 사라진다. 낡은 사본이 없는 사본보다 낫다.
+      throw new Error('CORE 확보 실패: ' + failed.join(', '));
+    }
+    // 온전할 때만 대기를 건너뛴다. skipWaiting 을 맨 앞에 두면 실패한 판이
+    // 곧바로 활성으로 올라온다.
+    await self.skipWaiting();
+  })());
 });
 
 self.addEventListener('activate', (e) => {
   e.waitUntil((async () => {
-    const keys = await caches.keys();
-    await Promise.all(keys.map((k) => (k !== CACHE_NAME ? caches.delete(k) : null)));
+    const cache = await caches.open(CACHE_NAME);
 
     // 설치가 채워 놓았으면 할 일이 없다. 아니면 여기서 채운다.
-    const cache = await caches.open(CACHE_NAME);
-    if (!(await cache.match(CORE_MANIFEST))) await populate('activate');
+    if (!(await cache.match(CORE_MANIFEST)) || !(await coreComplete(cache))) {
+      await populate('activate');
+    }
+
+    // **새 사본이 온전할 때만 옛 캐시를 버린다.** 아니면 그대로 둔다 —
+    // 지워 봐야 돌아오는 건 빈 화면뿐이다.
+    if (await coreComplete(cache)) {
+      const keys = await caches.keys();
+      await Promise.all(keys.map((k) => (k !== CACHE_NAME ? caches.delete(k) : null)));
+    }
 
     await self.clients.claim();
   })());

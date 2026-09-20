@@ -1766,7 +1766,12 @@ function resetDoc(btn) {
   }
   disarmReset();
 
+  // 번호를 올려 아직 돌고 있는 판독·분석이 화면을 되살리지 못하게 한다.
+  // 안 올리면 초기화 직후에 앞 문서가 늦게 끝나면서 다시 떠오른다.
+  newDocJob();
+
   if (pageObserver) { pageObserver.disconnect(); pageObserver = null; }
+  releaseLayout(LAYOUT);
   DATA = null;
   LAYOUT = null;
   PAGE_MARKS = null;
@@ -1812,35 +1817,67 @@ function setView(v) {
     else if (pageObserver) pageObserver.disconnect();
 }
 
-function show(fullText, name) {
+/* 문서 한 번 여는 일에 번호를 붙인다.
+ *
+ * PDF 판독과 분석은 둘 다 비동기라, 조종사가 파일을 고르고 곧바로 다른 파일을
+ * 고르면 **먼저 고른 쪽이 늦게 끝나면서 최종 화면을 차지한다.** 마지막에 고른
+ * 문서가 아니라 마지막에 끝난 문서가 화면에 남는 것이고, 화면에는 그런 기색이
+ * 전혀 없다 — 조종사는 자기가 고른 문서를 보고 있다고 믿는다.
+ *
+ * 그래서 모든 비동기 완료 지점에서 "아직 내 차례인가"를 묻는다. 초기화나 새
+ * 선택이 번호를 올리면 앞선 작업은 결과를 버린다. */
+let docJob = 0;
+const newDocJob = () => ++docJob;
+const isCurrent = (job) => job === docJob;
+
+function show(fullText, name, job) {
+  if (job !== undefined && !isCurrent(job)) return;   // 이미 다른 문서로 넘어갔다
   const out = document.getElementById('out');
   out.innerHTML = '<div class="busy">분석 중…</div>';
   // Yield once so the message actually paints before the engine blocks the
   // thread; on a tablet this run is seconds, not milliseconds.
   setTimeout(() => {
+    if (job !== undefined && !isCurrent(job)) return;
     try {
-      DATA = analyseFlight(fullText);
+      const data = analyseFlight(fullText);
+      if (job !== undefined && !isCurrent(job)) return;  // 분석 도중에 갈렸을 수도 있다
+      DATA = data;
       PAGE_MARKS = null;                 // marks belong to this document only
       document.getElementById('intake').style.display = 'none';
       header(name); segs(); render(); setView('report');
     } catch (e) {
+      if (job !== undefined && !isCurrent(job)) return;
       out.innerHTML = '<div class="err">분석에 실패했습니다: ' + esc(e && e.message) + '</div>';
     }
   }, 30);
 }
 
 async function openPdf(file) {
+  const job = newDocJob();                 // 이 선택이 지금부터 유일한 작업이다
   const out = document.getElementById('out');
   out.innerHTML = '<div class="busy">PDF를 읽는 중…</div>';
+  let layout = null;
   try {
     // The layout carries the text plus where every run of it sits, which is
     // what lets the RAW view mark the real page. Samples have no PDF behind
     // them, so LAYOUT stays null there and the RAW button stays disabled.
-    LAYOUT = await extractPdfLayout(file);
-    show(LAYOUT.fullText, file.name);
+    layout = await extractPdfLayout(file);
+    if (!isCurrent(job)) { releaseLayout(layout); return; }   // 그새 다른 문서로 갈렸다
+    releaseLayout(LAYOUT);                 // 앞 문서의 pdf.js 자원을 놓는다
+    LAYOUT = layout;
+    show(layout.fullText, file.name, job);
   } catch (e) {
+    releaseLayout(layout);
+    if (!isCurrent(job)) return;
     out.innerHTML = '<div class="err">PDF를 읽지 못했습니다: ' + esc(e && e.message) + '</div>';
   }
+}
+
+/* 버리는 레이아웃이 들고 있던 pdf.js 문서를 닫는다. 99쪽짜리를 연달아 열면
+   이걸 안 놓는 것만으로 사파리가 탭을 죽인다. */
+function releaseLayout(layout) {
+  if (!layout || !layout.doc || typeof layout.doc.destroy !== 'function') return;
+  try { layout.doc.destroy(); } catch (e) { /* 이미 닫혔으면 그만이다 */ }
 }
 
 document.getElementById('pick').addEventListener('click', () => document.getElementById('file').click());
@@ -1853,7 +1890,7 @@ document.getElementById('file').addEventListener('change', (e) => {
 // bookmarked this page had no offline copy at all.
 // 화면에 찍는 빌드 표지. 배포할 때 sw.js 의 CACHE_NAME 과 같이 올린다 —
 // 아이패드에서 옛 버전이 떠도 조종사가 알아볼 방법이 없던 문제.
-const BUILD = 'v23 · 2026-09-20';
+const BUILD = 'v24 · 2026-09-20';
 document.getElementById('buildTag').textContent = BUILD;
 mountAd();
 
@@ -1919,6 +1956,22 @@ async function checkOfflineReady() {
 }
 
 async function forceUpdate() {
+  // **지우기 전에 받아올 수 있는지부터 본다.** 통신이 안 되는 곳에서 누르면
+  // 새 사본은 못 받고 기내 사본만 잃는다 — 이 앱이 제일 경계하는 상태를
+  // 사용자가 직접 만들게 된다. 통신이 없으면 아무것도 건드리지 않는다.
+  const el = document.getElementById('offlineRdy');
+  try {
+    const probe = await fetch('./index.html?probe=' + Date.now(), { cache: 'reload' });
+    if (!probe || !probe.ok) throw new Error('HTTP ' + (probe && probe.status));
+  } catch (e) {
+    if (el) {
+      el.className = 'rdy bad';
+      el.lastElementChild.textContent = '통신이 안 돼 최신 버전을 받을 수 없습니다 — 기내 사본은 그대로 둡니다';
+      el.title = '통신되는 곳에서 다시 누르십시오. 지금 지우면 받아올 것이 없습니다.';
+    }
+    return;
+  }
+
   try {
     if ('caches' in window) {
       const keys = await caches.keys();
