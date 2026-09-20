@@ -49,6 +49,15 @@
   .segs{display:flex;flex-wrap:wrap;align-items:center;gap:6px;padding:10px 0}
   /* 어느 버튼도 줄어들거나 줄바꿈하지 않는다. */
   .view,.rst{flex:0 0 auto;white-space:nowrap}
+  /* 분류 끝에 접어 두는 음영 묶음. 접혀 있어도 건수는 늘 보인다. */
+  .fold{margin:6px 0 2px;border:1px solid #223247;border-radius:10px;background:#0b1420}
+  .fold>summary{list-style:none;display:flex;align-items:center;gap:8px;flex-wrap:wrap;
+                min-height:var(--tap);padding:8px 12px;cursor:pointer;
+                font-size:12.5px;color:#8fb4e0}
+  .fold>summary::-webkit-details-marker{display:none}
+  .fold>summary .why{font-weight:500;color:var(--ink3)}
+  .fold[open]>summary .chev{transform:rotate(90deg)}
+  .fold>.list{padding:0 10px 10px}
 
   .intake{margin-top:18px;border:1px dashed #2c3f5e;border-radius:16px;background:var(--panel);
           padding:26px 18px;text-align:center}
@@ -568,42 +577,68 @@ function bySubject(items, category) {
 }
 
 function subBlock(name, items) {
-  const shown = items.filter(keep);
-  if (!shown.length) return '';
+  if (!items.length) return '';
   return '<div class="sub2"><div class="sub2h">' + esc(name) +
-    '<span class="cnt">' + shown.length + '</span></div>' +
-    shown.map(card).join('') + '</div>';
+    '<span class="cnt">' + items.length + '</span></div>' +
+    items.map(card).join('') + '</div>';
 }
 
 function catBlock(name, items) {
-  const shown = items.filter(keep);
-  if (!shown.length) return '';
+  if (!items.length) return '';
   const srcs = [...new Set(items.map((i) => i.categoryLabel).filter(Boolean))];
-  const subs = bySubject(items, name);
-  const inner = subs
-    ? subs.map(([k, v]) => subBlock(k, v)).join('')
-    : shown.map(card).join('');
+  // 음영은 소그룹으로 흩어 놓지 않고 분류 끝에 한 덩어리로 접는다. 소그룹마다
+  // 접으면 같은 안내가 열 번 찍히고, 접힌 게 몇 건인지 한눈에 안 보인다.
+  const open = items.filter(isOpenItem);
+  const subs = bySubject(open, name);
+  const inner = (subs ? subs.map(([k, v]) => subBlock(k, v)).join('') : open.map(card).join('')) +
+    foldBlock(items.filter((i) => !isOpenItem(i)));
   return '<details class="cat" open><summary><span class="chev">&#9656;</span><span>' +
     '<h3>' + esc(name) + '</h3>' +
     (srcs.length ? '<div class="src">' + esc(srcs.join(" + ")) + '</div>' : '') +
-    '</span><span class="cnt">' + shown.length + ' / ' + items.length + '</span></summary>' +
+    '</span><span class="cnt">' + open.length + ' / ' + items.length + '</span></summary>' +
     '<div class="list">' + inner + '</div></details>';
+}
+
+/* 음영 항목은 접는다 — 지우지 않는다.
+ *
+ * 등화·표지·비운항 시간대처럼 성격상 뒤로 물릴 수 있는 것들이 활주로 폐쇄
+ * 열 줄 사이에 섞여 있으면 정작 봐야 할 것이 묻힌다. 공항 뷰가 쓰는 것과
+ * 같은 방식으로 분류마다 한 번 접고, **건수와 펼치기를 남긴다.**
+ *
+ * 전에는 탭 줄의 필터 칩이 이 일을 했다. 칩 네 개가 폭을 414px 먹으면서
+ * 탭 줄이 뷰마다 달라지는 원인이었고, 접기는 접을 것 옆에 두는 편이 낫다 —
+ * 전역 필터 상태도 같이 없어진다. */
+const isOpenItem = (it) => !it.autoShaded;
+
+function foldBlock(items) {
+  if (!items.length) return '';
+  const by = {};
+  items.forEach((i) => { const k = i.reasonBadge || '음영'; (by[k] = by[k] || []).push(i); });
+  const tally = Object.entries(by).sort((a, b) => b[1].length - a[1].length)
+    .map(([k, v]) => k + ' ' + v.length).join(' · ');
+  return '<details class="fold"><summary><span class="chev">&#9656;</span>' +
+    '<b>음영 ' + items.length + '건</b><span class="why">' + esc(tally) + '</span></summary>' +
+    '<div class="list">' + items.map(card).join('') + '</div></details>';
 }
 
 function section(title, sub, items, opts) {
   opts = opts || {};
-  const shown = items.filter(keep);
+  const open = items.filter(isOpenItem);
   const counts = items.reduce((a, it) => { const b = bucket(it); a[b] = (a[b] || 0) + 1; return a; }, {});
   const badge = ["crit", "calc", "rev", "appl", "shade"]
     .filter((k) => counts[k]).map((k) => LABEL[k][0] + " " + counts[k]).join(" · ");
+  // 평면 목록(PACKAGE 2)도 같은 규칙으로 접는다. 안 그러면 머리글의
+  // "N / 전체"가 접힌 것이 있다고 말하는데 실제로는 다 펼쳐져 있다.
   const inner = opts.flat
-    ? '<div class="list">' + (shown.length ? shown.map(card).join('') : '<div class="empty">해당 항목 없음</div>') + '</div>'
+    ? '<div class="list">' + (items.length
+        ? open.map(card).join('') + foldBlock(items.filter((i) => !isOpenItem(i)))
+        : '<div class="empty">해당 항목 없음</div>') + '</div>'
     : (byCategory(items).map(([k, v]) => catBlock(k, v)).join('') ||
-       '<div class="empty">이 필터에 해당하는 항목이 없습니다</div>');
+       '<div class="empty">해당 항목 없음</div>');
   return '<details class="pkg' + (opts.excluded ? ' excl' : '') + '"' + (opts.open ? ' open' : '') + '>' +
     '<summary><span class="chev">&#9656;</span><span><h2>' + esc(title) + '</h2>' +
     '<div class="sub">' + esc(sub) + (badge ? ' · ' + badge : '') + '</div></span>' +
-    '<span class="cnt">' + shown.length + ' / ' + items.length + '</span></summary>' + inner + '</details>';
+    '<span class="cnt">' + open.length + ' / ' + items.length + '</span></summary>' + inner + '</details>';
 }
 
 /* ---- FIR-by-FIR summary, the first thing on the page ----------------
@@ -1215,11 +1250,13 @@ function render() {
 
 /* 탭 줄. 뷰 단추와 초기화뿐이다.
  *
- * 필터 칩 네 개(중요만·음영 제외·전체·음영만)가 여기 있었는데 **아무것도 하지
- * 않았다.** 판정 함수 keep() 이 정의만 되어 있고 호출하는 곳이 없어서, 누르면
- * 자기 눌림 표시만 바뀌고 어느 뷰도 달라지지 않았다. 조종석에서 눌러도 안 되는
- * 단추는 없느니만 못하다. 같이 지웠다 — filter, keep(), 공항 뷰에서 칩을
- * 흐리게 하던 .noseg 까지. 되살릴 거라면 호출부부터 만들어야 한다. */
+ * 필터 칩 네 개(중요만·음영 제외·전체·음영만)가 여기 있었다. 목록 뷰에서는
+ * 실제로 동작했지만 **다른 세 뷰에서는 아무 일도 하지 않았고**, 폭을 414px
+ * 먹으면서 탭 줄이 뷰마다 달라지는(=탭을 누를 때마다 화면이 흔들리는) 원인이었다.
+ *
+ * 칩을 지우고 그 기능은 목록 뷰 안으로 옮겼다 — 분류마다 음영을 한 번 접고
+ * 건수와 펼치기를 남긴다(`foldBlock`). 접기는 접을 것 옆에 있는 편이 낫고,
+ * 전역 필터 상태(`filter`/`keep()`)도 같이 없어졌다. */
 function segs() {
   document.getElementById('segs').innerHTML =
     '<span class="views">' +
@@ -1816,7 +1853,7 @@ document.getElementById('file').addEventListener('change', (e) => {
 // bookmarked this page had no offline copy at all.
 // 화면에 찍는 빌드 표지. 배포할 때 sw.js 의 CACHE_NAME 과 같이 올린다 —
 // 아이패드에서 옛 버전이 떠도 조종사가 알아볼 방법이 없던 문제.
-const BUILD = 'v22 · 2026-09-20';
+const BUILD = 'v23 · 2026-09-20';
 document.getElementById('buildTag').textContent = BUILD;
 mountAd();
 
