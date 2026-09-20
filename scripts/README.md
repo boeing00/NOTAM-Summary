@@ -1,6 +1,6 @@
 # 회귀 하네스
 
-엔진(`notam_engine.js`)을 고칠 때 **바뀌면 안 되는 것이 안 바뀌었음을 보이기 위한** 도구다.
+**바뀌면 안 되는 것이 안 바뀌었음을 보이기 위한** 도구다.
 의존성 없음. node 만 있으면 된다. 빌드 단계는 여전히 없다.
 
 ## 엔진을 고칠 때
@@ -11,21 +11,51 @@ node scripts/snapshot.js before.json     # 고치기 전
 node scripts/snapshot.js after.json
 node scripts/compare.js before.json after.json
 node scripts/audit.js
+node scripts/screen.js
+```
+
+## 화면 코드(`index.html`)를 고칠 때
+
+```bash
+node scripts/screen.js
 ```
 
 `compare.js` 가 내놓는 **변경 항목 목록이 곧 검토 대상이다.** 의도한 것만 바뀌었는지
 눈으로 확인하고, 그 숫자를 커밋 본문에 적는다. 변경이 있으면 종료 코드 1인데
 실패라는 뜻이 아니라 읽으라는 뜻이다.
 
-`audit.js` 는 다르다. 위반이 나오면 **버그다.**
+`audit.js` 와 `screen.js` 는 다르다. 위반이 나오면 **버그다.**
 
 ## 파일
 
 | | |
 |---|---|
-| `snapshot.js` | 번들 샘플 2편(826건)의 전 항목을 `{pkg, reason, shaded, cat, subj, ko}` 로 기록 |
+| `snapshot.js` | 번들 샘플 2편(826건)의 전 항목을 `{pkg, reason, shaded, cat, subj, ko, badge, detail}` 로 기록 |
 | `compare.js` | 스냅샷 둘을 전수 대조하고 바뀐 항목만 출력 |
 | `audit.js` | 불변식 검사 5종. CLAUDE.md "고쳐놓은 함정"이 다시 들어왔는지 본다 |
+| `screen.js` | **화면 코드를 실제로 돌린다.** 세 뷰가 터지지 않고 항목을 잃지 않는지 |
+
+## screen.js 가 보는 것
+
+`audit.js` 는 `notam_engine.js` 만 본다. 화면 코드는 브라우저에서만 돌기 때문에
+**한 번도 검사된 적이 없었고**, 그래서 `keep()` 을 지웠을 때 목록 뷰가 통째로 죽은 채
+(`분석에 실패했습니다: keep is not defined`) 커밋까지 갔다. 문서를 열면 `render()` 가
+먼저 도는데, 사람이 보고서 탭만 확인하면 그대로 지나간다.
+
+node 의 `vm` 위에 **아주 얇은 DOM 흉내**를 세우고 엔진·샘플·`index.html` 의 인라인
+스크립트를 한 덩어리로 실행한 뒤 `show()` 를 부른다. 그리고 묻는다:
+
+1. 목록 뷰가 **오류 배너**를 띄우지 않았는가 (`show()` 가 `render()` 실패를 잡아 배너만
+   띄우므로, 안 터졌다고 넘어가면 안 된다 — 정확히 그렇게 놓쳤다)
+2. 목록 뷰 카드 수 == 엔진 항목 수 (**접어도 사라지면 안 된다**)
+3. 항로·공항 뷰가 터지지 않고 비어 있지 않은가
+4. 공항 뷰 항목 수 == PACKAGE 1 건수
+
+버그가 있던 커밋(`db2176e`)에 대고 돌려 **실제로 잡는지 확인했다** — 두 샘플 모두
+`분석에 실패했습니다: keep is not defined` 로 종료 코드 1.
+
+브라우저가 아니므로 **레이아웃·스타일·클릭은 모른다.** 탭 줄이 찌그러지거나 버튼이
+안 눌리는 종류는 이 검사가 답하지 않는다 — 그건 실물로 봐야 한다.
 
 ## audit.js 가 보는 것
 

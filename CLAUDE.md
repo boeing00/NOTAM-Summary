@@ -52,7 +52,13 @@ node scripts/snapshot.js before.json
 node scripts/snapshot.js after.json
 node scripts/compare.js before.json after.json   # 바뀐 항목 = 검토 대상
 node scripts/audit.js                            # 위반 = 버그
+node scripts/screen.js                           # 화면이 터지지 않는가
 ```
+
+**`index.html` 의 화면 코드를 고쳤으면 `scripts/screen.js` 를 돌린다.** node 의 `vm` 에
+얇은 DOM 을 세우고 화면 코드를 실제로 실행해 세 뷰를 그린다 — 오류 배너가 떴는지,
+카드 수가 엔진 항목 수와 같은지(접어도 사라지면 안 된다) 본다. `audit.js` 는 엔진만
+보므로 화면이 통째로 죽어도 통과한다. 실제로 그렇게 `keep is not defined` 가 커밋까지 갔다.
 
 `compare` 가 내놓는 변경 목록과 건수를 **커밋 본문에 적는다.** "826건 중 변경 2건,
 분류·음영은 한 건도 안 움직였다"가 리팩터가 무해했다는 증명이고, 그게 다음 사람이
