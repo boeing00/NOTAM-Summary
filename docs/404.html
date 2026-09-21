@@ -60,9 +60,18 @@
     return Promise.all(jobs);
   }
 
+  /* 데스크톱 화면을 북마크해 둔 사람은 데스크톱 화면으로 보낸다. 전부 루트로
+   * 보내면 조종석 화면이 뜨는데, 그건 그 사람이 찾던 화면이 아니다.
+   *
+   * 아는 경로만 넘긴다. 모르는 경로를 그대로 이어 붙이면 새 주소에서 또 404 가
+   * 나고, 그러면 옛 404 를 새 404 로 바꾼 것뿐이다. */
+  var base = '/NOTAM-Summary/';
+  var sub = location.pathname.indexOf(base) === 0 ? location.pathname.slice(base.length) : '';
+  if (sub !== 'desktop.html') sub = '';   // /, /index, /index.html, /ipad.html … → 루트
+
   /* 정리가 끝나면 간다. 끝나지 않아도 2초 뒤에는 간다 — 청소하다 멈춰서
    * 안내문에 갇히면 그게 더 나쁘다. 쿼리·해시는 그대로 넘긴다. */
-  var dest = NEW + location.search + location.hash;   // NEW 는 / 로 끝난다
+  var dest = NEW + sub + location.search + location.hash;   // NEW 는 / 로 끝난다
   var went = false;
   function go() { if (!went) { went = true; location.replace(dest); } }
   purge().then(go);
