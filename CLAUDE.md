@@ -3,12 +3,15 @@
 조종사용 단일 파일 웹앱. OFP(운항계획서) PDF를 브라우저에서 파싱해 NOTAM을 전량
 나열하고, **FPL 항로와 NOTAM 제한 조건을 교차 대조**한다.
 
-라이브: https://boeing00.github.io/NOTAM-Summary/
+라이브: **https://notam-summary.vercel.app/** (2026-09-21 이전. 아래 "주소 체계" 참조)
 저장소: `boeing00/NOTAM-Summary` · 로컬 `C:\Users\moons\NOTAM-Summary`
-배포: main 푸시 → GitHub Pages, 약 30~60초. 확인은 아래로.
+배포: main 푸시 → **Vercel** 자동 재배포, 약 30초. 빌드 단계는 없다.
+옛 주소 `boeing00.github.io/NOTAM-Summary/` 는 **GitHub Pages 가 `docs/` 껍데기만**
+내보낸다 — 같은 리포의 두 호스트가 서로 다른 것을 낸다.
 
 ```bash
-curl -s "https://boeing00.github.io/NOTAM-Summary/desktop.html?cb=$RANDOM" | grep -c parseCdrTable
+curl -s "https://notam-summary.vercel.app/desktop.html" | grep -c parseCdrTable
+curl -s "https://boeing00.github.io/NOTAM-Summary/?cb=$RANDOM" | grep -c "주소가 바뀌었습니다"
 ```
 
 ## 파일
@@ -706,8 +709,44 @@ never guessed"라고 적혀 있었다. 그런데 `render()`가 `pkg` 1·3·2만 
 | NOTAM-Briefer | `C:\Users\moons\NOTAM-Briefer` | 4탭 브리핑 앱 |
 
 
-## 주소 체계 (2026-09-14 변경)
+## 주소 체계
 
-아이패드 화면을 `index.html` 로 옮겼다 — 접속 주소는 `https://boeing00.github.io/NOTAM-Summary/index` (루트 `/` 도 같다).
-데스크톱 화면은 `desktop.html`. 옛 `ipad.html` 은 `./index` 로 넘기는 껍데기만 남겼다
+### 호스트를 옮겼다 (2026-09-21) — 광고 때문이다
+
+**애드핏 웹 매체를 가르는 것은 호스트다. 경로가 아니다.** 메인 URL 에 경로까지
+적어 신청해도 고유값은 호스트만 남는다 — `Utilities for Pilot` 이
+`/pilot-utilities/` 로 등록됐는데 콘솔 고유값이 `boeing00.github.io` 인 것이
+증거다. GitHub Pages 사용자 사이트는 호스트를 공유하므로 거기 올린 앱은 몇 개든
+매체 하나다. 그래서 이 앱을 별개 매체로 낸 신청이 **반려**됐다.
+
+호스트를 갈랐다. 앱은 **Vercel** 이 배포하고(`notam-summary.vercel.app`),
+GitHub Pages 는 **`docs/` 껍데기만** 내보낸다(소스 `main /docs`). 리포는 하나고
+루트가 앱이다 — `.vercelignore` 가 `docs` 를 빼므로 새 주소에서 안내문이 또 보이지
+않는다.
+
+껍데기는 **서비스워커와 캐시를 먼저 지운다.** 안 지우면 옛 주소에 설치해 둔
+아이패드가 캐시에 든 옛 앱을 계속 띄워 안내문을 영영 못 본다. 청소가 안 끝나도
+2초 뒤에는 넘어간다 — 안내문에 갇히는 게 더 나쁘다. `404.html` 을 같이 두어
+Pages 가 못 찾은 주소(`/index`, `/ipad.html` …)가 전부 걸리게 했고,
+`desktop.html` 만 같은 경로로 넘긴다(나머지는 루트).
+
+**Vercel 에 `vercel.json` 을 만들지 않는다.** `cleanUrls` 를 켜면 `/index.html`
+이 308 이 되는데, 리디렉션된 응답을 서비스워커가 내비게이션에 돌려주면 브라우저가
+거부한다. 기본값이면 200 이다. 실측(기존 배포 기준): `/` 200 · `/index.html` 200
+(리디렉션 없음) · **`/index` 404**. 그래서 확장자 없는 `/index` 는 더 이상 주소가
+아니다 — `ipad.html` 껍데기도 `./index` 대신 `./` 로 보낸다.
+
+덤으로 **HTTP 캐시 함정이 사라졌다.** Vercel 은
+`Cache-Control: public, max-age=0, must-revalidate` 를 붙인다(GitHub Pages 는
+HTML 에 `max-age=600`, Pages 에서는 못 바꾼다).
+
+**광고 호출은 `ADFIT_HOST` 와 호스트가 같을 때만 나간다.** ID 가 `DAN-` 패턴인지만
+보던 가드로는 *발급받은 단위를 엉뚱한 곳에서 부르는* 경우를 못 막는데, 같은 리포가
+두 호스트에서 서비스되는 지금 그게 실재한다. 등록되지 않은 도메인에서의 호출은
+계정 전체가 걸리는 사고다. **주소를 또 옮기면 단위도 새 매체에서 다시 받아야 한다.**
+
+### 화면 파일 (2026-09-14 변경)
+
+아이패드 화면을 `index.html` 로 옮겼다 — 접속 주소는 루트 `/`.
+데스크톱 화면은 `desktop.html`. 옛 `ipad.html` 은 `./` 로 넘기는 껍데기만 남겼다
 (옛 주소로 홈 화면에 추가해 둔 아이패드가 빈 화면이 되지 않게). 위 과거 기록 속 `ipad.html` 은 지금의 `index.html` 이다.
