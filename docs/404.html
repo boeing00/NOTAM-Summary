@@ -1,0 +1,72 @@
+<!DOCTYPE html>
+<html lang="ko">
+<head>
+<meta charset="utf-8">
+<meta name="viewport" content="width=device-width,initial-scale=1">
+<title>NOTAM EFB · 주소가 바뀌었습니다</title>
+<meta name="robots" content="noindex">
+<style>
+  :root{color-scheme:dark}
+  body{margin:0;min-height:100dvh;display:flex;align-items:center;justify-content:center;
+       padding:32px 20px;background:#0a0f1d;color:#cbd5e1;line-height:1.7;
+       font-family:-apple-system,BlinkMacSystemFont,"Segoe UI",Roboto,"Malgun Gothic",sans-serif}
+  .w{width:100%;max-width:420px;text-align:center}
+  h1{font-size:20px;font-weight:800;color:#e2e8f0;margin:0 0 8px}
+  p{font-size:14px;color:#94a3b8;margin:0 0 20px}
+  a.go{display:inline-block;text-decoration:none;font-weight:700;font-size:15px;
+       color:#0a0f1d;background:#7dd3fc;border-radius:10px;padding:12px 22px}
+  .u{margin-top:18px;font:12px/1.6 ui-monospace,Menlo,monospace;color:#64748b;word-break:break-all}
+  .n{margin-top:22px;font-size:12.5px;color:#64748b}
+</style>
+</head>
+<body>
+<div class="w">
+  <h1>주소가 바뀌었습니다</h1>
+  <p>NOTAM &amp; Route Compliance EFB 는 새 주소로 옮겼습니다.<br>
+     잠시 후 자동으로 이동합니다.</p>
+  <a class="go" id="go" href="https://notam-summary.vercel.app/">새 주소로 이동</a>
+  <div class="u" id="url">https://notam-summary.vercel.app/</div>
+  <p class="n">홈 화면에 추가해 두셨다면 <b>새 주소에서 다시 추가</b>해 주십시오.
+     이 주소의 오프라인 사본은 더 이상 갱신되지 않습니다.</p>
+</div>
+<script>
+  /* 옛 주소를 새 주소로 넘기는 껍데기.
+   *
+   * 앱 본체는 리포 루트에 그대로 있고 새 호스트가 그걸 배포한다. GitHub Pages
+   * 는 이 docs/ 폴더만 내보내므로 옛 주소에는 이 안내문만 남는다.
+   *
+   * 새 주소가 한 곳에만 적혀야 갈라지지 않는다. Vercel 프로젝트 이름을 다르게
+   * 두었으면 아래 NEW 한 줄만 고치면 된다. */
+  var NEW = 'https://notam-summary.vercel.app/';
+
+  document.getElementById('go').href = NEW;
+  document.getElementById('url').textContent = NEW;
+
+  /* **서비스워커를 먼저 지운다.** 안 지우면 옛 주소에 설치해 둔 아이패드는
+   * 캐시에 든 옛 앱을 계속 띄우고 이 안내문을 영영 못 본다. 캐시도 같이 비운다
+   * — 이 출처에는 이제 앱이 없으므로 들고 있어 봐야 옛 판만 살려 둔다. */
+  function purge() {
+    var jobs = [];
+    if (navigator.serviceWorker && navigator.serviceWorker.getRegistrations) {
+      jobs.push(navigator.serviceWorker.getRegistrations()
+        .then(function (rs) { return Promise.all(rs.map(function (r) { return r.unregister(); })); })
+        .catch(function () {}));
+    }
+    if (window.caches && caches.keys) {
+      jobs.push(caches.keys()
+        .then(function (ks) { return Promise.all(ks.map(function (k) { return caches.delete(k); })); })
+        .catch(function () {}));
+    }
+    return Promise.all(jobs);
+  }
+
+  /* 정리가 끝나면 간다. 끝나지 않아도 2초 뒤에는 간다 — 청소하다 멈춰서
+   * 안내문에 갇히면 그게 더 나쁘다. 쿼리·해시는 그대로 넘긴다. */
+  var dest = NEW + location.search + location.hash;   // NEW 는 / 로 끝난다
+  var went = false;
+  function go() { if (!went) { went = true; location.replace(dest); } }
+  purge().then(go);
+  setTimeout(go, 2000);
+</script>
+</body>
+</html>

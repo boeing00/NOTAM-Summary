@@ -6,11 +6,14 @@
 <title>NOTAM · 주소가 바뀌었습니다</title>
 <script>
   // 아이패드 화면은 index 로 옮겼다. 쿼리·해시는 그대로 넘긴다.
-  location.replace('./index' + location.search + location.hash);
+  // 확장자 없는 ./index 가 아니라 ./ 로 보낸다 — 전자는 GitHub Pages 가
+  // 확장자를 붙여 주는 데 기대는 주소라 다른 정적 호스트에서 404 가 된다
+  // (실측: Vercel 기본 설정에서 /index 는 404, / 와 /index.html 은 200).
+  location.replace('./' + location.search + location.hash);
 </script>
-<meta http-equiv="refresh" content="0; url=./index">
+<meta http-equiv="refresh" content="0; url=./">
 </head>
 <body style="background:#0a0f1d;color:#cbd5e1;font-family:system-ui;padding:24px">
-  주소가 바뀌었습니다 — <a href="./index" style="color:#7dd3fc">새 주소로 이동</a>
+  주소가 바뀌었습니다 — <a href="./" style="color:#7dd3fc">새 주소로 이동</a>
 </body>
 </html>
