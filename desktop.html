@@ -26,7 +26,7 @@
     <script src="./aar202_text.js?v=2.6"></script>
 
     <!-- Shared engine: also loaded by index.html (iPad view) -->
-    <script src="./notam_engine.js?v=3.7"></script>
+    <script src="./notam_engine.js?v=3.8"></script>
 
     <script>
         pdfjsLib.GlobalWorkerOptions.workerSrc = './vendor/pdf.worker.min.js?v=3.11.174';
@@ -839,11 +839,16 @@ E) NAV ILS RWY 26R CAT II/III NA`
                                 const dc = r.result.dailyCheck;
                                 if (dc) {
                                     why.push(`\ud65c\uc131 \uc2dc\uac04\ub300 <span class="text-slate-300">D) ${dc.spec}</span> \u00b7 ${r.item.station} \uc9c4\uc785 <span class="text-slate-300">${hhmm(dc.entry)}Z</span> \u2014 `
-                                        + (dc.inWindow
+                                        // inWindow \ub294 true / false / null(\ubabb \uc77d\uc74c) \uc138 \uc0c1\ud0dc\ub2e4.
+                                        // `? :` \ub85c \uac00\ub974\uba74 null \uc774 "\ucc3d \ubc16"\uc73c\ub85c \ucc0d\ud600,
+                                        // \uc5d4\uc9c4\uc774 \ud310\uc815\uc744 \ud3ec\uae30\ud55c \uac83\uc744 \ud654\uba74\uc774 \ub2e8\uc815\ud574 \ubc84\ub9b0\ub2e4.
+                                        + (dc.inWindow === true
                                             ? '<span class="text-rose-300">\ucc3d \uc548</span>'
-                                            : '<span class="text-emerald-300">\ucc3d \ubc16</span>')
-                                        + (dc.dayQualified
-                                            ? '<div class="mt-1 text-[11px] text-slate-500">\uc694\uc77c/\uc77c\uc790 \uc870\uac74\uc774 \ud568\uaed8 \uc788\uc2b5\ub2c8\ub2e4 \u2014 \uc2dc\uac01\ub9cc \ub300\uc870\ud588\uc73c\ubbc0\ub85c \uc9c1\uc811 \ud655\uc778\ud558\uc2ed\uc2dc\uc624.</div>'
+                                            : dc.inWindow === false
+                                                ? '<span class="text-emerald-300">\ucc3d \ubc16</span>'
+                                                : '<span class="text-violet-300">\ud310\uc815 \ubd88\uac00</span>')
+                                        + (dc.inWindow === null
+                                            ? '<div class="mt-1 text-[11px] text-slate-500">\ub0a0\uc9dc\u00b7\uc694\uc77c \uc870\uac74\uc774 \ubd99\uc5b4 \uc2dc\uac01\ub9cc\uc73c\ub85c\ub294 \ud310\uc815\ud560 \uc218 \uc5c6\uc2b5\ub2c8\ub2e4 \u2014 \uc6d0\ubb38\uc744 \ud655\uc778\ud558\uc2ed\uc2dc\uc624.</div>'
                                             : ''));
                                 }
 

@@ -2296,8 +2296,19 @@
                     const liveAt = validFrom
                         ? (t >= validFrom && (validPerm || !validTo || t <= validTo))
                         : null;
+                    // **D절이 없는 것과, 있는데 못 읽은 것은 다른 사실이다.**
+                    // 둘 다 `dailyAt: null` 로 뭉개면 아래 `active` 가 일일 조건을
+                    // 통째로 빠뜨린 채 `liveAt` 만으로 "발효 중"이라고 단정한다 —
+                    // 유효기간만 보고 운영시간을 무시하는 셈이다.
                     let dailyAt = null;
-                    if (daily) dailyAt = inAnyWindow(Math.floor(t / 60000) % 1440, daily.windows);
+                    let dailyUnread = false;
+                    if (daily) {
+                        if (daily.complete) {
+                            dailyAt = inAnyWindow(Math.floor(t / 60000) % 1440, daily.windows);
+                        } else {
+                            dailyUnread = true;   // 날짜·요일 조건이 붙어 시각만으로는 못 정한다
+                        }
+                    }
                     // Not in force and already finished are different facts,
                     // and a crew reads them differently: one moves with a
                     // delay, the other never will.
@@ -2315,12 +2326,13 @@
                         utcMin: Math.floor(t / 60000) % 1440,
                         liveAt,
                         dailyAt,
+                        dailyUnread,
                         reason,
                         startsMs: validFrom || null,
                         endsMs: validPerm ? null : (validTo || null),
                         // Only when both are known and both say yes does this
                         // become a statement; otherwise it stays a report.
-                        active: (liveAt === null) ? null
+                        active: (liveAt === null || dailyUnread) ? null
                               : (dailyAt === null ? liveAt : (liveAt && dailyAt))
                     };
                 }
