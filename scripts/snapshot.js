@@ -51,15 +51,27 @@ function xcDigest(x) {
         limits: (x.limits || []).join('|'),
         route: (x.routeHits || []).join('|'),
         geo: x.geo ? r1(x.geo.minNm) + '/' + x.geo.lateralClear + '/' + x.geo.vertClear : null,
+        // **개수만 담으면 판정이 뒤집혀도 못 잡는다.** 금지공역 `entered`
+        // false→true, 구간선 `crosses` false→true, CDR `INSIDE→OUTSIDE` 가
+        // 전부 "변경 0건"으로 지나갔다. 대상 식별자와 판정값을 같이 담는다.
         zones: x.zones
-            ? ((x.zones.banned || []).length + ':' + (x.zones.gates || []).length)
+            ? ((x.zones.banned || []).map((z) => 'B' + z.entered + '/' + r1(z.nearestNm)).join(',') +
+               ';' + (x.zones.gates || []).map((g) => 'G' + g.crosses + '/' + r1(g.nearestNm)).join(','))
             : null,
-        pass: x.passage ? x.passage.reason + '@' + r1(x.passage.utcMin) + '/' + r1(x.passage.nm) + 'NM' : null,
-        cdr: (x.cdr || []).length,
+        // passage 는 시각·거리뿐 아니라 **일일창 판정과 최종 활성 여부**까지.
+        // 이걸 빼 두었다가 `dailyAt` 우회를 고쳤는데도 "차이 없음" 이 나왔다.
+        pass: x.passage
+            ? [x.passage.reason, r1(x.passage.utcMin), r1(x.passage.nm) + 'NM',
+               'daily=' + String(x.passage.dailyAt),
+               'unread=' + String(!!x.passage.dailyUnread),
+               'active=' + String(x.passage.active)].join('/')
+            : null,
+        cdr: (x.cdr || []).map((c) => c.awy + ':' + c.verdict + '/' + r1(c.marginMin)).join('|'),
         cond: (x.conditions || []).map((c) => c.ref + ':' + c.verdict).join('|'),
         // 일일 운영시간은 "안/밖"뿐 아니라 **판정했는지 여부**까지 담아야 한다.
         daily: x.dailyCheck
-            ? (x.dailyCheck.complete ? String(x.dailyCheck.inWindow) : '판정불가')
+            ? (x.dailyCheck.complete ? String(x.dailyCheck.inWindow) : '판정불가') +
+              '@' + r1(x.dailyCheck.entry)
             : null
     };
 }
