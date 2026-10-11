@@ -1904,6 +1904,84 @@
                 const t = c.text;
                 let r = null;
 
+                /* --- PREMISE ------------------------------------------------
+                 * Before any test: is this flight the clause's subject at all?
+                 *
+                 * Run first and over every clause, including the ones no test
+                 * below recognises. A clause scoped to a direction we do not
+                 * fly, or to airspace we do not enter, is not something to
+                 * check by hand - it is not ours, and the engine can say which
+                 * input says so. Edmonton's user-preferred-route clauses are
+                 * the case: westbound traffic routing toward Vancouver FIR,
+                 * on a flight that goes CZWG -> CZEG -> PAZA.
+                 *
+                 * Only the opposite sense on the same axis counts. "WESTBOUND"
+                 * against a northbound flight is not a contradiction, so it
+                 * stays unjudged rather than being waved away.
+                 */
+                const dirM = t.match(/\b(EAST|WEST|NORTH|SOUTH)[\s\-/]?BOUND\b/);
+                if (dirM && ctx.dir) {
+                    const want = dirM[1][0];                       // E W N S
+                    const OPP = { E: "W", W: "E", N: "S", S: "N" };
+                    if (OPP[want] === ctx.dir.axis) {
+                        const KO = { E: "동향", W: "서향", N: "북향", S: "남향" };
+                        results.push({ ref: c.ref, text: c.text, verdict: "NA",
+                            why: KO[want] + "편 대상 조항 — 이 비행은 " + ctx.dir.ko +
+                                 "이다 (" + (ctx.dir.from || "출발") + " → " + (ctx.dir.to || "도착") +
+                                 ", 경도 " + (ctx.dir.dLon >= 0 ? "+" : "") + ctx.dir.dLon + "°)" });
+                        continue;
+                    }
+                }
+
+                // Scoped to airspace: the FIR names have to sit in a phrase
+                // that limits the clause, not merely appear in it. A bare
+                // mention can be a prohibition on a FIR, which is a different
+                // thing from a rule that binds only flights inside it.
+                //
+                // And a token is a FIR only if it is a published FIR code.
+                // Matching any four capitals before "FIR" reads the tail of
+                // the word in front of it: "ANCHORAGE FIR" yields RAGE,
+                // "ANCHORAGE ARTCC FIR" yields RTCC, and neither is an
+                // airspace we cross - so both clauses were declared not ours.
+                // A0176/26 clause 1 is one of them, and it is the clause
+                // CLAUDE.md records as verified satisfied on AAR223.
+                const scopeM = t.match(/\b(?:FLTS?\s+)?(?:ENTERING|EXITING|ENTRY\/EXIT|ENTERY\/EXIT|TRANSITING|TRANSITION|OPERATING|LANDING|DEPARTING)\b[^.]{0,80}?((?:\b[A-Z]{4}\b(?:\s*,\s*|\s+OR\s+|\s+AND\s+|\s+))+)FIR\b/);
+                if (!r && scopeM && ctx.firs.size) {
+                    const named = (scopeM[1].match(/\b[A-Z]{4}\b/g) || [])
+                        .filter((f) => Object.prototype.hasOwnProperty.call(FIR_NAMES, f));
+                    if (named.length && named.every((f) => !ctx.firs.has(f))) {
+                        results.push({ ref: c.ref, text: c.text, verdict: "NA",
+                            why: named.join(", ") + " FIR 대상 조항 — 이 비행의 통과 FIR 은 " +
+                                 (ctx.firSeq.length ? ctx.firSeq.map((s) => s.fir).join(" → ")
+                                                    : Array.from(ctx.firs).join(", ")) +
+                                 " 로, 지명된 공역에 들어가지 않는다" });
+                        continue;
+                    }
+                }
+
+                // A clause that opens "<FIR> FIR:" states its own subject.
+                // A2472/26's clause 2 is three of them - CZEG, CZVR, KZAK -
+                // and only one applies to any given flight. The lettered
+                // clause under a FIR we do not enter is not something to read
+                // by hand; it is not ours.
+                //
+                // Anchored at the start on purpose. "CROSS THE PAZA/RJJJ FIR
+                // BOUNDARY OVER OR SOUTH OF AKISU" names two FIRs mid-sentence
+                // and is an obligation, not a scope - matching it anywhere
+                // would wave away the clause that does bind us.
+                if (!r) {
+                    const headM = t.match(/^(?:[A-Z0-9]\.\s*)?([A-Z]{4})\s+FIR\s*:/);
+                    if (headM && Object.prototype.hasOwnProperty.call(FIR_NAMES, headM[1]) &&
+                        ctx.firs.size && !ctx.firs.has(headM[1])) {
+                        results.push({ ref: c.ref, text: c.text, verdict: "NA",
+                            why: headM[1] + " FIR 조항 — 이 비행의 통과 FIR 은 " +
+                                 (ctx.firSeq.length ? ctx.firSeq.map((q) => q.fir).join(" → ")
+                                                    : Array.from(ctx.firs).join(", ")) +
+                                 " 로, 이 공역에 들어가지 않는다" });
+                        continue;
+                    }
+                }
+
                 // A. "<FIR> FIR: ... MUST FLT PLAN OVER ONE OF THE FOLLOWING
                 //     FIXES: X, Y, Z ... OR W."
                 const listM = t.match(/MUST\s+FLT\s+PLAN\s+OVER\s+ONE\s+OF\s+THE\s+FOLLOWING\s+FIXES?:?\s+([A-Z0-9,\s]+?)(?:\.|$)/);
@@ -2401,6 +2479,261 @@
             };
         }
 
+        /* ==============================================================
+         * Which way this flight goes
+         *
+         * A clause can bind one direction only - "WESTBOUND FLTS", "ENTERING
+         * BTN CZEG, CZVR OR KZAK FIR". Without a direction those clauses all
+         * report unmet, which is a false alarm on every flight that was never
+         * their subject.
+         *
+         * Summed leg by leg, not endpoint to endpoint: a net shiftLon takes the
+         * short way round and a route may fly the long one. Consecutive
+         * waypoints never span 90 deg (see planarLegs), so each leg's sign is
+         * unambiguous.
+         * ============================================================== */
+        function flightDirection(ctx) {
+            const pts = (ctx && ctx.track && ctx.track.points) || [];
+            if (pts.length < 2) return null;
+            let dLon = 0;
+            for (let i = 0; i + 1 < pts.length; i += 1) dLon += shiftLon(pts[i + 1].lon, pts[i].lon);
+            const a = pts[0], b = pts[pts.length - 1];
+            const dLat = b.lat - a.lat;
+            // A degree of longitude is shorter than a degree of latitude at
+            // every latitude but the equator. Compare ground distance, not
+            // degree counts, before deciding which axis names the flight.
+            const ew = dLon * Math.cos(((a.lat + b.lat) / 2) * Math.PI / 180);
+            const axis = Math.abs(ew) >= Math.abs(dLat)
+                ? (ew >= 0 ? "E" : "W")
+                : (dLat >= 0 ? "N" : "S");
+            const KO = { E: "동향", W: "서향", N: "북향", S: "남향" };
+            const EN = { E: "EASTBOUND", W: "WESTBOUND", N: "NORTHBOUND", S: "SOUTHBOUND" };
+            // Label the ends with the filed airports when the FPL gives
+            // them. The track's own first and last rows can be pseudo rows -
+            // AAR223's first is the string "FIR", a boundary marker, not a
+            // place - and naming a direction after one reads as nonsense.
+            const realName = (list) => {
+                for (const w of list) if (w.name && /^[A-Z]{3,5}$/.test(w.name) && w.name !== "FIR") return w.name;
+                return null;
+            };
+            const f = ctx.fpl || {};
+            return {
+                axis, ko: KO[axis], en: EN[axis],
+                dLon: Math.round(dLon * 10) / 10,
+                dLat: Math.round(dLat * 10) / 10,
+                from: f.dep || realName(pts) || null,
+                to: f.dest || realName(pts.slice().reverse()) || null
+            };
+        }
+
+        /* ==============================================================
+         * Why this NOTAM is, or is not, on this flight's list
+         *
+         * The report has to say both. A list of what applies, with no account
+         * of what was set aside and on what grounds, cannot be checked: the
+         * crew has no way to tell a considered exclusion from a parse that
+         * silently dropped something.
+         *
+         * Every line this produces is a value the engine already computed - a
+         * set membership, a distance, a clock comparison - and says which
+         * input produced it. Nothing is read out of the prose.
+         *
+         *   APPLIES     named for somewhere we go, and live when we are there
+         *   TIME_OUT    named, but the clock puts it outside our passage
+         *   SPACE_OUT   not named for any airport, FIR or route point of ours
+         *   PREMISE_NA  its own stated precondition is false for this flight
+         *   SHADED      applies; lighting/marking, so ranked down - never hidden
+         * ============================================================== */
+        function applicability(it, ctx) {
+            const x = it && it.xc;
+            if (!x) return null;
+
+            // Each ground carries what kind of ground it is. The screen needs
+            // that: "our airport" and "valid during the flight window" are
+            // true of every NOTAM in an airport section and say nothing one
+            // item at a time, so a row built only from those is ten identical
+            // sentences under ten different runway closures. The report prints
+            // the row only when something item-specific was computed - the
+            // same rule `운항 영향` already follows.
+            const why = [];           // the computed grounds, in reading order
+            const against = [];       // the grounds that push the other way
+            const w = (kind, text) => why.push({ kind, text });
+            const no = (kind, text) => against.push({ kind, text });
+
+            if (x.stationMatch) w("station", "우리 공항·발행 공역 고시 — " + it.station);
+            if (x.firMatch) {
+                w("fir", "통과 FIR 에 신고 — " + it.station +
+                    (x.firContext && x.firContext.prev ? " (" + x.firContext.prev + " 다음)" : ""));
+            }
+            if (x.routeHits && x.routeHits.length) {
+                w("route", "비행계획 항로 일치 — " + x.routeHits.join(", "));
+            }
+            if (x.navaidHits && x.navaidHits.length) {
+                w("navaid", "우리 항법시설 지명 — " + x.navaidHits.join(", "));
+            }
+            if (x.geo && x.geo.minNm !== null) {
+                w("geo", "항적 최근접 " + Math.round(x.geo.minNm) + "NM" +
+                    (x.geo.radius ? " (반경 " + x.geo.radius + "NM)" : "") +
+                    (x.geo.vertClear === true ? " · 고도 비중첩" :
+                     x.geo.vertClear === false ? " · 고도 중첩" : "") +
+                    " [" + (x.geomSource === "OFP" ? "OFP 웨이포인트 표" : "15항 좌표점") + "]");
+            }
+            const p = x.passage;
+            if (p) {
+                const REASON = {
+                    IN_FORCE: "통과 시각에 발효 중",
+                    BEFORE_START: "통과 시각에는 아직 발효 전",
+                    AFTER_END: "통과 시각에는 이미 종료",
+                    UNKNOWN: "통과 시각의 발효 여부 판정 불가"
+                };
+                const leg = (p.between || []).filter(Boolean).join("~");
+                const line = "최근접 " + Math.round(p.nm) + "NM" +
+                    (leg ? " (" + leg + ")" : "") +
+                    " · 통과 " + hhmm(p.utcMin).replace(":", "") + "Z · " + REASON[p.reason];
+                (p.reason === "IN_FORCE" ? w : no)("passage", line);
+            } else if (x.timeState === "OUTSIDE") {
+                no("time", "유효기간이 비행 시간대와 겹치지 않는다");
+            } else if (x.timeState) {
+                w("time", "유효기간이 비행 시간대와 겹친다");
+            }
+            if (x.scopedElsewhere) {
+                const named = []
+                    .concat(x.namedTheirs || [], x.airwaysTheirs || [])
+                    .slice(0, 8);
+                no("scope", "지명된 픽스·항공로가 전부 우리 항로 밖" +
+                    (named.length ? " — " + named.join(", ") : ""));
+            }
+            if (x.navaidNoise) {
+                no("noise", "항법시설 사용 불가 고시이나 우리 항로 시설이 하나도 지명되지 않았다");
+            }
+
+            // A clause whose own precondition is false is the Edmonton case:
+            // the flight was never its subject, and the engine can say so
+            // because the premise is a set test or an inequality.
+            //
+            // `conditions` is the flat clause list. A HEADER is a section
+            // title that introduces the lettered clauses under it and carries
+            // no obligation of its own, so it votes on nothing here.
+            const cond = Array.isArray(x.conditions)
+                ? x.conditions.filter((c) => c.verdict !== "HEADER")
+                : null;
+            const naAll = cond && cond.length > 0 && cond.every((c) => c.verdict === "NA");
+            if (cond) {
+                cond.filter((c) => c.verdict === "NA" && c.why)
+                    .slice(0, 6)
+                    .forEach((c) => no("clause", c.ref + "항 해당 없음 — " + c.why));
+                cond.filter((c) => c.verdict === "OK" && c.why)
+                    .slice(0, 6)
+                    .forEach((c) => w("clause", c.ref + "항 충족 — " + c.why));
+            }
+
+            let state;
+            if (x.timeState === "OUTSIDE") state = "TIME_OUT";
+            else if (!x.relevant) state = "SPACE_OUT";
+            else if (naAll) state = "PREMISE_NA";
+            else if (p && p.active === false) state = "TIME_OUT";
+            else if (it.autoShaded) state = "SHADED";
+            else state = "APPLIES";
+
+            if (state === "SPACE_OUT" && !against.length) {
+                no("scope", "우리 공항·통과 FIR·비행계획 항로 어디에도 지명되지 않았다");
+            }
+            if (state === "SHADED") {
+                no("shade", "등화·표지 계열 — 운항 가부를 좌우하지 않으므로 순위를 낮춘다");
+            }
+            // PACKAGE 2 is re-dispatch, ETP and en-route alternate aerodromes:
+            // off the analysis by standing order, but listed and counted, so
+            // the reason it is set aside has to be the standing order and not
+            // silence. See CLAUDE.md.
+            if (it.pkg === 2) {
+                no("pkg", "PACKAGE 2 (재출항·ETP·항로상 교체공항) — 기본 분석 대상이 아니다");
+            }
+
+            const KO = {
+                APPLIES: "적용", TIME_OUT: "시각으로 제외", SPACE_OUT: "공간으로 제외",
+                PREMISE_NA: "조항 전제 불일치", SHADED: "음영 (적용되나 하단)"
+            };
+            // The one line that governs. For a PACKAGE 2 item it is the
+            // standing order, whatever else also happens to be true of it;
+            // otherwise it is the first ground computed. A report that groups
+            // exclusions needs a single key per item or the same NOTAM is
+            // counted under two reasons.
+            const gov = it.pkg === 2
+                ? against.filter((g) => g.kind === "pkg")[0]
+                : against[0];
+            return {
+                state, ko: KO[state], why, against,
+                primary: state === "APPLIES" ? null : (gov ? gov.text : null),
+                primaryKind: state === "APPLIES" ? null : (gov ? gov.kind : null),
+                direction: ctx && ctx.dir ? ctx.dir.ko : null
+            };
+        }
+
+        /* ==============================================================
+         * What a delay would newly catch
+         *
+         * Every clock judgement above is made at one instant - the moment the
+         * track passes closest. That instant moves with a delay, and some of
+         * these margins are minutes wide. KZAK A4226/26 is passed 22 minutes
+         * before it comes into force; AAR224 enters L512 39 minutes after it
+         * opens. A report that states the verdict and not its margin hands the
+         * crew a number that is true only if nothing slips.
+         *
+         * Each row is signed minutes of delay: positive means a delay of that
+         * many minutes changes the verdict, and the sign of `turns` says which
+         * way. Arithmetic on values already computed - no new judgement.
+         * ============================================================== */
+        function delaySensitivity(items) {
+            const rows = [];
+            (items || []).forEach((it) => {
+                const x = it.xc;
+                if (!x) return;
+                const p = x.passage;
+                if (p) {
+                    if (p.reason === "BEFORE_START" && p.startsMs) {
+                        rows.push({
+                            id: it.id, station: it.station, min: Math.round((p.startsMs - p.tMs) / 60000),
+                            turns: "ENTERS", at: p.utcMin, nm: Math.round(p.nm),
+                            what: "지연되면 발효 중에 통과한다"
+                        });
+                    } else if (p.reason === "IN_FORCE" && p.endsMs) {
+                        rows.push({
+                            id: it.id, station: it.station, min: Math.round((p.endsMs - p.tMs) / 60000),
+                            turns: "LEAVES", at: p.utcMin, nm: Math.round(p.nm),
+                            what: "그만큼 지연되면 종료 후에 통과한다"
+                        });
+                    }
+                }
+                (x.cdr || []).forEach((c) => {
+                    if (!c.open || c.enter === null) return;
+                    // Two margins, and only one of them is what a delay eats:
+                    // the one at the near end of the opening.
+                    const inMin = Math.round((c.enter - c.open.from) / 60000);
+                    const outMin = c.marginMin;
+                    if (c.verdict === "INSIDE" && outMin !== null) {
+                        // Two margins, and the near one is what a delay eats.
+                        // Report the one a delay actually closes: leaving the
+                        // opening at the far end. The entry margin is stated
+                        // alongside so the tighter number is not hidden.
+                        rows.push({
+                            id: it.id, station: it.station, min: outMin, turns: "LEAVES",
+                            at: null, nm: null,
+                            what: c.awy + " 개방창 종료까지의 여유 (진입은 개방 " + inMin + "분 후)"
+                        });
+                    } else if (c.verdict === "OUTSIDE" && inMin < 0) {
+                        rows.push({
+                            id: it.id, station: it.station, min: -inMin, turns: "ENTERS",
+                            at: null, nm: null,
+                            what: c.awy + " 개방 전 진입 — 그만큼 지연되면 개방 후가 된다"
+                        });
+                    }
+                });
+            });
+            // Tightest first: the rows a delay reaches soonest are the briefing.
+            rows.sort((a, b) => Math.abs(a.min) - Math.abs(b.min));
+            return rows;
+        }
+
         /** Runs the cross-check over every parsed NOTAM and summarises it. */
         /**
          * Everything crossCheckNotam() needs to know about the flight, built
@@ -2438,6 +2771,10 @@
             });
             const dof = parseDofMs(fullText), etd = parseEtdMin(fullText);
             ctx.baseMs = (dof !== null && etd !== null) ? dof + etd * 60000 : null;
+
+            // Which way we go, for the clauses that bind one direction only.
+            // Needs the track, so it comes after buildRouteTrack above.
+            ctx.dir = flightDirection(ctx);
             return ctx;
         }
 
@@ -2684,7 +3021,11 @@
                     }))
                 },
                 baseMs: ctx.baseMs,
+                dir: ctx.dir,
                 firBriefing: buildFirBriefing(ctx, items),
+                // Signed minutes of delay that would change a clock verdict.
+                // Computed from the items, so it comes after they are built.
+                delay: delaySensitivity(items),
                 items: items
             };
         }
@@ -2847,6 +3188,9 @@ if (typeof module !== "undefined" && module.exports) {
         hasLeg,
         firEntryPoint,
         checkStatedConditions,
+        flightDirection,
+        applicability,
+        delaySensitivity,
         crossCheckNotam,
         buildCrossCheckContext,
         FIR_NAMES,

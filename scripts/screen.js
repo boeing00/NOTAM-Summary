@@ -113,7 +113,18 @@ function runOne(name, file, varName, fail) {
         // 같은 스크립트 안에서 닫아 잡아 꺼낸다.
         'globalThis.__run = function () { show(' + varName + ', ' + JSON.stringify(name) + '); };\n' +
         'globalThis.__state = function () {\n' +
+        '  var ex = 0;\n' +
+        // 보고서는 FIR 절마다 제외 목록을 낸다. 공항 고시는 첫 FIR 과
+        // 마지막 FIR 에 모두 붙으므로(CLAUDE.md), 절별 합계로 세야 화면에
+        // 찍힌 수와 비교가 성립한다 — 전역 유니크로 세면 멀쩡한데도 어긋난다.
+        '  if (DATA && DATA.firBriefing) DATA.firBriefing.segments.forEach(function (sg) {\n' +
+        '    sg.items.forEach(function (it) {\n' +
+        '      var a = applicability(it, { dir: DATA.dir });\n' +
+        '      if (a && a.state !== "APPLIES" && a.state !== "SHADED") ex += 1;\n' +
+        '    });\n' +
+        '  });\n' +
         '  return { total: DATA ? DATA.items.length : 0,\n' +
+        '           excluded: ex,\n' +
         '           pkg1: DATA ? DATA.items.filter(function (i) { return i.pkg === 1; }).length : 0 };\n' +
         '};'
     ].join('\n;\n');
@@ -175,7 +186,38 @@ function runOne(name, file, varName, fail) {
         fail(name + ' 공항 뷰 항목 수가 PACKAGE 1 과 다르다: ' + ri + ' vs ' + p1);
     }
 
-    console.log('  OK   ' + name + ' — 목록 ' + cards + '건, 공항 ' + ri + '건, 항로/공항 렌더');
+    /* 항로 뷰의 보고서 절이 실제로 그려졌는가.
+     *
+     * length > 500 만 보면 FIR 절만 남고 대조 기준·지연 민감도·확인 사항이
+     * 통째로 빠져도 통과한다. 이 셋은 보고서가 "무엇에 대고 판정했는지"와
+     * "지연되면 무엇이 달라지는지"를 말하는 자리이고, 조용히 사라지면
+     * 보고서가 완결된 것처럼 보인다 — 이 앱이 반복해서 당한 그 모양이다. */
+    const rep = el('report').innerHTML;
+    for (const [needle, label] of [
+        ['class="rbasis"', '대조 기준'],
+        ['지연 민감도', '지연 민감도'],
+        ['브리핑 확인 사항', '브리핑 확인 사항'],
+        ['분석 범위 밖', '분석 범위'],
+        ['적용 근거', '적용 근거 행']
+    ]) {
+        if (rep.indexOf(needle) < 0) fail(name + ' 항로 뷰에 ' + label + ' 절이 없다');
+    }
+
+    /* 제외 목록이 한 건도 잃거나 겹치지 않는가.
+     *
+     * 제외 근거를 근거별로 묶어 접는데, 묶는 키가 항목마다 하나뿐이어야
+     * 같은 고시가 두 근거 아래 두 번 세어지지 않는다. 화면에 찍힌 번호 수와
+     * 엔진이 제외로 판정한 항목 수를 직접 맞춰 본다. */
+    const st = sandbox.__state();
+    const listed = (rep.match(/class="rexi">([^<]*)</g) || [])
+        .reduce((n, blk) => n + blk.replace(/^class="rexi">/, '').split(' · ').filter(Boolean).length, 0);
+    if (st.excluded !== undefined && listed !== st.excluded) {
+        fail(name + ' 제외 목록 번호 수가 엔진 제외 판정 수와 다르다: ' +
+            listed + ' vs ' + st.excluded);
+    }
+
+    console.log('  OK   ' + name + ' — 목록 ' + cards + '건, 공항 ' + ri +
+        '건, 제외 목록 ' + listed + '건, 보고서 5절 렌더');
 }
 
 function main() {
