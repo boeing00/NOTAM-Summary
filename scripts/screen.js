@@ -198,6 +198,10 @@ function runOne(name, file, varName, fail) {
         ['지연 민감도', '지연 민감도'],
         ['브리핑 확인 사항', '브리핑 확인 사항'],
         ['분석 범위 밖', '분석 범위'],
+        // AI 해설은 저장된 것이 없으면 버튼만 나오는 것이 정상이다. 칸 자체가
+        // 안 그려지면 지상에서 만들어 둘 방법이 사라진다.
+        ['class="aitop"', 'AI 해설 머리'],
+        ['data-ai=', 'AI 해설 생성 버튼'],
         ['적용 근거', '적용 근거 행']
     ]) {
         if (rep.indexOf(needle) < 0) fail(name + ' 항로 뷰에 ' + label + ' 절이 없다');
@@ -217,7 +221,7 @@ function runOne(name, file, varName, fail) {
     }
 
     console.log('  OK   ' + name + ' — 목록 ' + cards + '건, 공항 ' + ri +
-        '건, 제외 목록 ' + listed + '건, 보고서 5절 렌더');
+        '건, 제외 목록 ' + listed + '건, 보고서 7절 렌더');
 }
 
 function main() {

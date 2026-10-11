@@ -1,4 +1,4 @@
-const CACHE_NAME = 'notam-efb-v29';
+const CACHE_NAME = 'notam-efb-v30';
 
 /* 기내에서 이게 없으면 앱이 아니라 빈 화면이다.
  *

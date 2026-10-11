@@ -1546,7 +1546,7 @@ E) NAV ILS RWY 26R CAT II/III NA`
 
         // PWA Service Worker Registration with automatic update
         if ('serviceWorker' in navigator) {
-            navigator.serviceWorker.register('./sw.js?v=8').then(reg => {
+            navigator.serviceWorker.register('./sw.js?v=9').then(reg => {
                 reg.update();
             }).catch(err => console.log('SW Reg:', err));
         }
